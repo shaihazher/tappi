@@ -234,9 +234,9 @@ class ResearchSession:
         )
 
         today = date.today().strftime("%B %d, %Y")
-        # Only substitute {today} here; {workspace}, {context_*} are filled
+        # All placeholders ({today}, {workspace}, {context_*}) are filled
         # dynamically by Agent._build_system_prompt() on each LLM call.
-        system = SUB_AGENT_SYSTEM_PROMPT.replace("{today}", today)
+        system = SUB_AGENT_SYSTEM_PROMPT
         agent = self._create_agent(system_prompt=system)
         prompt = SUB_AGENT_TASK_PROMPT.format(
             task=subtopic["task"],

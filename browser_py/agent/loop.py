@@ -35,6 +35,8 @@ You are a capable AI assistant with browser control, file management, and \
 automation skills. You operate within a designated workspace directory and \
 can control a web browser to accomplish tasks.
 
+Today's date is {today}.
+
 ## Your Tools
 
 - **browser**: Navigate, click, type, read pages, take screenshots. Use your \
@@ -153,27 +155,27 @@ class Agent:
 
     def _build_system_prompt(self) -> str:
         """Build system prompt with current context usage stats."""
+        from datetime import date as _date
         from browser_py.agent.sessions import get_context_limit
 
         model = get_model()
         context_limit = get_context_limit(model)
         context_used = self._last_prompt_tokens
         context_pct = round(context_used / context_limit * 100) if context_limit else 0
+        today = _date.today().strftime("%B %d, %Y")
 
-        if self._custom_system_prompt:
-            return self._custom_system_prompt.format(
-                workspace=self.workspace,
-                context_limit=context_limit,
-                context_used=context_used,
-                context_pct=context_pct,
-            )
-
-        return SYSTEM_PROMPT.format(
+        fmt = dict(
             workspace=self.workspace,
             context_limit=context_limit,
             context_used=context_used,
             context_pct=context_pct,
+            today=today,
         )
+
+        if self._custom_system_prompt:
+            return self._custom_system_prompt.format(**fmt)
+
+        return SYSTEM_PROMPT.format(**fmt)
 
     def _setup_litellm(self) -> None:
         """Configure LiteLLM with the right provider credentials."""
