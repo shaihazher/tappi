@@ -20,6 +20,13 @@ import os
 import textwrap
 
 from browser_py.core import Browser, CDPError, BrowserNotRunning, _find_chrome
+from browser_py.profiles import (
+    list_profiles,
+    get_profile,
+    create_profile,
+    set_default,
+    delete_profile,
+)
 
 
 # ── Colors (disable with NO_COLOR env var) ──
@@ -55,27 +62,36 @@ def _red(s: str) -> str:
 
 COMMANDS_HELP = {
     "launch": {
-        "usage": "browser-py launch [--port PORT] [--user-data-dir PATH] [--headless]",
+        "usage": "browser-py launch [name] [--headless] [--port PORT]",
         "desc": (
-            "Start Chrome with remote debugging enabled.\n\n"
-            "Creates a separate browser profile at ~/.browser-py/profile so it\n"
-            "doesn't interfere with your regular Chrome. Your logins and cookies\n"
-            "in this profile persist across restarts.\n\n"
-            "First time: a fresh Chrome window opens — log into your sites.\n"
-            "Next time: same command, all your sessions are still there."
+            "Start Chrome with a named profile.\n\n"
+            "Each profile has its own browser sessions (cookies, logins) and\n"
+            "its own CDP port. Profiles live in ~/.browser-py/profiles/<name>/.\n\n"
+            "Subcommands:\n"
+            "  launch              Launch the default profile\n"
+            "  launch <name>       Launch a specific profile\n"
+            "  launch new [name]   Create a new profile\n"
+            "  launch list         List all profiles\n"
+            "  launch --default <name>   Set the default profile\n"
+            "  launch delete <name>      Delete a profile"
         ),
         "example": (
             "  $ browser-py launch\n"
-            "  ✓ Chrome launched on port 9222\n"
-            "    Profile: ~/.browser-py/profile\n\n"
-            "  $ browser-py launch --port 9333\n"
-            "  ✓ Chrome launched on port 9333\n\n"
-            "  $ browser-py launch --headless   # No visible window (for servers)"
+            "  ✓ Chrome launched — profile: default (port 9222)\n\n"
+            "  $ browser-py launch new work\n"
+            "  ✓ Created profile 'work' (port 9223)\n\n"
+            "  $ browser-py launch work\n"
+            "  ✓ Chrome launched — profile: work (port 9223)\n\n"
+            "  $ browser-py launch list\n"
+            "  default  port 9222  ★ default\n"
+            "  work     port 9223\n\n"
+            "  $ browser-py launch --default work\n"
+            "  ✓ Default profile set to 'work'"
         ),
         "hint": (
-            "First launch? A Chrome window will open. Log into the sites you\n"
-            "want to automate (Gmail, GitHub, etc.). Close the window when done.\n"
-            "Next time you launch, those sessions are still active."
+            "First launch of a profile? A fresh Chrome window opens.\n"
+            "Log into your sites — sessions persist for all future launches.\n"
+            "Each profile gets its own port, so you can run multiple simultaneously."
         ),
     },
     "tabs": {
@@ -242,7 +258,10 @@ def print_main_help() -> None:
         (
             "Setup",
             [
-                ("launch", "Start Chrome with remote debugging"),
+                ("launch [name]", "Start Chrome (default or named profile)"),
+                ("launch new [name]", "Create a new profile"),
+                ("launch list", "List all profiles"),
+                ("launch --default <name>", "Set the default profile"),
             ],
         ),
         (
@@ -333,74 +352,173 @@ def print_command_help(cmd: str) -> None:
 
 
 def run_launch(args: list[str]) -> str:
-    """Handle the launch command with its own arg parsing."""
-    import os
-    from pathlib import Path
+    """Handle the launch command with profile management."""
+    import json as _json
+    from urllib.request import urlopen
+    from urllib.error import URLError
 
-    port = 9222
-    user_data_dir = None
+    # Parse flags
     headless = False
     chrome_path = None
+    port_override = None
+    default_name = None
+    positional = []
 
     i = 0
     while i < len(args):
         arg = args[i]
-        if arg in ("--port", "-p") and i + 1 < len(args):
-            port = int(args[i + 1])
-            i += 2
-        elif arg in ("--user-data-dir", "--profile", "-d") and i + 1 < len(args):
-            user_data_dir = args[i + 1]
-            i += 2
-        elif arg in ("--headless",):
+        if arg == "--headless":
             headless = True
             i += 1
         elif arg in ("--chrome", "--browser") and i + 1 < len(args):
             chrome_path = args[i + 1]
             i += 2
+        elif arg in ("--port", "-p") and i + 1 < len(args):
+            port_override = int(args[i + 1])
+            i += 2
+        elif arg == "--default" and i + 1 < len(args):
+            default_name = args[i + 1]
+            i += 2
         else:
+            positional.append(arg)
             i += 1
 
-    data_dir = user_data_dir or os.path.join(Path.home(), ".browser-py", "profile")
+    # Handle --default flag
+    if default_name is not None:
+        set_default(default_name)
+        return f"✓ Default profile set to {_bold(default_name)}"
 
-    # Check if port is already in use
+    subcmd = positional[0] if positional else None
+
+    # ── launch list ──
+    if subcmd == "list":
+        profiles = list_profiles()
+        if not profiles:
+            return (
+                "No profiles yet.\n"
+                + _dim("Create one with: browser-py launch new <name>")
+            )
+        lines = [_bold("Profiles:"), ""]
+        max_name = max(len(p["name"]) for p in profiles)
+        for p in profiles:
+            default_marker = _yellow(" ★ default") if p["is_default"] else ""
+            lines.append(
+                f"  {p['name']:<{max_name}}  port {p['port']}{default_marker}"
+            )
+        lines.append("")
+        lines.append(_dim("Launch with: browser-py launch <name>"))
+        return "\n".join(lines)
+
+    # ── launch new [name] ──
+    if subcmd == "new":
+        name = positional[1] if len(positional) > 1 else None
+        if not name:
+            # Interactive: ask for name
+            try:
+                name = input("Profile name: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                return "Cancelled."
+        if not name:
+            return _red("Profile name cannot be empty.")
+
+        profile = create_profile(name, port=port_override)
+        lines = [
+            f"✓ Created profile {_bold(profile['name'])} (port {profile['port']})",
+            f"  Path: {_dim(profile['path'])}",
+        ]
+        if profile["is_default"]:
+            lines.append(f"  {_yellow('★ Set as default')}")
+        lines.append("")
+
+        # Auto-launch it
+        return "\n".join(lines) + "\n" + _launch_profile(
+            profile, headless=headless, chrome_path=chrome_path
+        )
+
+    # ── launch delete <name> ──
+    if subcmd == "delete":
+        if len(positional) < 2:
+            return _red("Usage: browser-py launch delete <name>")
+        name = positional[1]
+        msg = delete_profile(name)
+        return f"✓ {msg}"
+
+    # ── launch [name] ──
+    profile_name = subcmd  # None means default
+
+    try:
+        profile = get_profile(profile_name)
+    except ValueError:
+        # Profile doesn't exist — offer to create it
+        if profile_name:
+            return (
+                _red(f"Profile '{profile_name}' not found.\n")
+                + f"\nCreate it with: {_bold(f'browser-py launch new {profile_name}')}\n"
+                + f"Or list existing: {_bold('browser-py launch list')}"
+            )
+        # No profiles at all — create "default"
+        profile = create_profile("default", port=port_override or 9222)
+
+    if port_override:
+        profile["port"] = port_override
+
+    return _launch_profile(profile, headless=headless, chrome_path=chrome_path)
+
+
+def _launch_profile(
+    profile: dict, *, headless: bool = False, chrome_path: str | None = None
+) -> str:
+    """Launch Chrome for a specific profile."""
+    import json as _json
     from urllib.request import urlopen
     from urllib.error import URLError
+
+    port = profile["port"]
+    data_dir = profile["path"]
+    name = profile["name"]
+
+    # Check if already running on this port
     try:
-        import json
-        json.loads(urlopen(f"http://127.0.0.1:{port}/json/version", timeout=2).read())
+        _json.loads(urlopen(f"http://127.0.0.1:{port}/json/version", timeout=2).read())
         return (
-            f"✓ Browser already running on port {port}\n"
-            f"  {_dim('Ready to use — try: browser-py tabs')}"
+            f"✓ Profile {_bold(name)} already running (port {port})\n"
+            + _dim("  Ready to use — try: browser-py tabs")
         )
     except (URLError, OSError):
         pass
 
-    is_first_launch = not os.path.exists(os.path.join(data_dir, "Default"))
+    is_first = not os.path.exists(os.path.join(data_dir, "Default"))
 
     Browser.launch(
         port=port,
-        user_data_dir=user_data_dir,
+        user_data_dir=data_dir,
         headless=headless,
         chrome_path=chrome_path,
     )
 
     lines = [
-        f"✓ Chrome launched on port {_bold(str(port))}",
-        f"  Profile: {_dim(data_dir)}",
+        f"✓ Chrome launched — profile: {_bold(name)} (port {port})",
+        f"  Path: {_dim(data_dir)}",
     ]
 
-    if is_first_launch:
+    if is_first:
         lines.append("")
         lines.append(_yellow("⚡ First launch — a fresh Chrome window opened."))
         lines.append("   Log into the sites you want to automate (Gmail, GitHub, etc.).")
         lines.append("   Those sessions will persist for all future launches.")
         lines.append("")
         lines.append(_dim("   When ready, open another terminal and run:"))
-        lines.append(_dim("   browser-py tabs"))
+        if port != 9222:
+            lines.append(_dim(f"   CDP_URL=http://127.0.0.1:{port} browser-py tabs"))
+        else:
+            lines.append(_dim("   browser-py tabs"))
     else:
         lines.append("")
         lines.append(_dim("Ready — your saved sessions are active."))
-        lines.append(_dim(f"Try: browser-py tabs"))
+        if port != 9222:
+            lines.append(_dim(f"Connect with: CDP_URL=http://127.0.0.1:{port} browser-py <command>"))
+        else:
+            lines.append(_dim("Try: browser-py tabs"))
 
     return "\n".join(lines)
 

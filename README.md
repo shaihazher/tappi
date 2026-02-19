@@ -27,9 +27,9 @@ browser-py launch
    Those sessions will persist for all future launches.
 ```
 
-**What happens:** browser-py starts a Chrome instance with its own profile directory (`~/.browser-py/profile`). This is separate from your regular Chrome — it won't interfere with your daily browsing.
+**What happens:** browser-py starts a Chrome instance with its own profile at `~/.browser-py/profiles/default/`. This is separate from your regular Chrome — it won't interfere with your daily browsing.
 
-> **First time only:** A fresh Chrome window opens. Log into the websites you want to automate — GitHub, Gmail, Reddit, whatever. Close the window when done. Your sessions are saved in the profile directory.
+> **First time only:** A fresh Chrome window opens. Log into the websites you want to automate — GitHub, Gmail, Reddit, whatever. Close the window when done. Your sessions are saved in the profile.
 
 ### Step 2: Launch again (sessions persist)
 
@@ -38,14 +38,14 @@ browser-py launch
 ```
 
 ```
-✓ Chrome launched on port 9222
-  Profile: ~/.browser-py/profile
+✓ Chrome launched — profile: default (port 9222)
+  Path: ~/.browser-py/profiles/default
 
 Ready — your saved sessions are active.
 Try: browser-py tabs
 ```
 
-**Everything you logged into last time is still there.** No re-authentication needed. The profile directory keeps your cookies, localStorage, and session data across restarts.
+**Everything you logged into last time is still there.** No re-authentication needed. The profile keeps your cookies, localStorage, and session data across restarts.
 
 ### Step 3: Control it
 
@@ -365,40 +365,88 @@ browser-py tabs
 
 ---
 
-## Launch Options
+## Profiles
+
+browser-py has built-in profile management. Each profile is a separate Chrome session with its own logins, cookies, and CDP port.
+
+### Create profiles
 
 ```bash
-# Default — port 9222, profile at ~/.browser-py/profile
+# First launch auto-creates a "default" profile
 browser-py launch
 
-# Custom port
-browser-py launch --port 9333
-
-# Custom profile location
-browser-py launch --user-data-dir ~/my-automation-profile
-
-# Headless mode (no visible window — for servers and CI)
-browser-py launch --headless
-
-# Specific Chrome/Chromium binary
-browser-py launch --chrome /usr/bin/chromium
+# Create a named profile
+browser-py launch new work
 ```
 
-### Multiple profiles
+```
+✓ Created profile 'work' (port 9223)
+✓ Chrome launched — profile: work (port 9223)
 
-Run different automation tasks with separate sessions:
+⚡ First launch — a fresh Chrome window opened.
+   Log into the sites you want to automate.
+   Those sessions will persist for all future launches.
+```
+
+### List profiles
 
 ```bash
-# Profile for work
-browser-py launch --port 9222 --user-data-dir ~/.browser-py/work
-
-# Profile for personal
-browser-py launch --port 9333 --user-data-dir ~/.browser-py/personal
-
-# Connect to each
-CDP_URL=http://127.0.0.1:9222 browser-py tabs   # work
-CDP_URL=http://127.0.0.1:9333 browser-py tabs   # personal
+browser-py launch list
 ```
+
+```
+Profiles:
+
+  default  port 9222  ★ default
+  work     port 9223
+  personal port 9224
+```
+
+### Launch a specific profile
+
+```bash
+browser-py launch work
+```
+
+### Set the default
+
+```bash
+browser-py launch --default work
+```
+
+Now `browser-py launch` (no name) launches the "work" profile.
+
+### Run multiple simultaneously
+
+Each profile gets its own port, so you can run them side by side:
+
+```bash
+# Terminal 1
+browser-py launch           # default profile on port 9222
+
+# Terminal 2
+browser-py launch work      # work profile on port 9223
+
+# Control each one
+browser-py tabs                                     # → default
+CDP_URL=http://127.0.0.1:9223 browser-py tabs       # → work
+```
+
+### Delete a profile
+
+```bash
+browser-py launch delete work
+```
+
+### Other options
+
+```bash
+browser-py launch --headless          # No visible window (servers/CI)
+browser-py launch --port 9333         # Override port
+browser-py launch --chrome /usr/bin/chromium   # Specific browser binary
+```
+
+Profiles are stored at `~/.browser-py/profiles/<name>/`. Config at `~/.browser-py/config.json`.
 
 ---
 
