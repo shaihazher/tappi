@@ -422,6 +422,10 @@ class Agent:
         self.session_id = session_id
         return True
 
+    def cleanup_browser(self) -> str:
+        """Close any browser tabs opened during this agent's session."""
+        return self._browser.cleanup()
+
     def save_session(self, title: str | None = None) -> dict[str, Any]:
         """Save current conversation as a session.
 

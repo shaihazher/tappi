@@ -767,6 +767,12 @@ def _run_scheduled_task(task: str) -> None:
         log_dir.mkdir(exist_ok=True)
         log_file = log_dir / f"{int(time.time())}_error.log"
         log_file.write_text(f"Task: {task}\n\nError:\n{e}\n")
+    finally:
+        # Clean up browser tabs opened by this task
+        try:
+            agent.cleanup_browser()
+        except Exception:
+            pass
 
 
 # ── Server entry point ──
@@ -1890,7 +1896,13 @@ async function submitSetup() {
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${proto}//${location.host}/ws`);
-  ws.onopen = () => { statusEl.textContent = 'Connected'; };
+  ws.onopen = () => {
+    statusEl.textContent = 'Connected';
+    // Fetch current token state on connect
+    fetch('/api/tokens').then(r => r.json()).then(u => {
+      if (u.total_tokens > 0) updateTokenBar(u);
+    }).catch(() => {});
+  };
   ws.onclose = () => { statusEl.textContent = 'Disconnected'; setTimeout(connect, 2000); };
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);

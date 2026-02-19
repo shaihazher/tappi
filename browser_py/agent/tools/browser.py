@@ -76,12 +76,17 @@ TOOL_SCHEMA = {
 
 
 class BrowserTool:
-    """Stateful browser tool that maintains a connection."""
+    """Stateful browser tool that maintains a connection.
+
+    Tracks tabs opened during this session so they can be cleaned up
+    when the agent is done (via close_opened_tabs or cleanup).
+    """
 
     def __init__(self, default_profile: str | None = None, download_dir: str | None = None) -> None:
         self._browser: Browser | None = None
         self._default_profile = default_profile
         self._download_dir = download_dir
+        self._opened_tabs: list[str] = []  # target IDs of tabs we opened
 
     def _get_browser(self) -> Browser:
         """Get or create the browser connection."""
@@ -130,7 +135,13 @@ class BrowserTool:
                 return browser.tab(int(idx))
 
             elif action == "newtab":
-                return browser.newtab(params.get("url"))
+                # Track tabs opened by the agent for cleanup
+                before_ids = {p["id"] for p in browser._get_pages()}
+                result = browser.newtab(params.get("url"))
+                after_ids = {p["id"] for p in browser._get_pages()}
+                new_ids = after_ids - before_ids
+                self._opened_tabs.extend(new_ids)
+                return result
 
             elif action == "close_tab":
                 idx = params.get("index")
@@ -245,6 +256,36 @@ class BrowserTool:
         B.launch(port=port, user_data_dir=profile["path"], download_dir=self._download_dir)
         self._browser = Browser(f"http://127.0.0.1:{port}")
         return f"Browser launched — profile: {profile['name']} (port {port})"
+
+    def cleanup(self) -> str:
+        """Close all tabs opened during this agent session.
+
+        Returns a summary of what was cleaned up.
+        """
+        if not self._opened_tabs or not self._browser:
+            self._opened_tabs.clear()
+            return "No tabs to clean up."
+
+        closed = 0
+        try:
+            pages = self._browser._get_pages()
+            page_ids = {p["id"] for p in pages}
+            for tid in self._opened_tabs:
+                if tid in page_ids:
+                    try:
+                        from urllib.request import urlopen
+                        urlopen(
+                            f"{self._browser.cdp_url}/json/close/{tid}",
+                            timeout=2,
+                        )
+                        closed += 1
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        self._opened_tabs.clear()
+        return f"Closed {closed} tab(s) opened during this session."
 
     def _list_profiles(self) -> str:
         """List available browser profiles."""

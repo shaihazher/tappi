@@ -141,7 +141,13 @@ class ResearchSession:
 
         agent = self._create_agent()
         prompt = PLANNER_PROMPT.format(n=self.num_agents, query=self.query)
-        response = agent.chat(prompt)
+        try:
+            response = agent.chat(prompt)
+        finally:
+            try:
+                agent.cleanup_browser()
+            except Exception:
+                pass
 
         # Parse the JSON from the response
         subtopics = self._parse_subtopics(response)
@@ -210,6 +216,12 @@ class ResearchSession:
                 f"# {subtopic['subtopic']}\n\n"
                 f"*Research failed: {e}*\n"
             )
+        finally:
+            # Clean up: close any browser tabs this sub-agent opened
+            try:
+                agent.cleanup_browser()
+            except Exception:
+                pass
 
         # If the agent didn't write the file, write what we got from its response
         if not abs_output.exists():
@@ -261,6 +273,11 @@ class ResearchSession:
                 f"*Compilation error: {e}*\n\n"
                 f"## Raw Findings\n\n{findings_text}"
             )
+        finally:
+            try:
+                agent.cleanup_browser()
+            except Exception:
+                pass
 
         report_path = self.workspace / output_file
         self._progress("complete", f"Report saved to {output_file}")
