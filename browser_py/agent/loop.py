@@ -163,9 +163,15 @@ class Agent:
         return cfg.get("timeout", 300)
 
     def _get_max_tokens(self) -> int:
-        """Get max output tokens from config (default 8192, max 64000)."""
+        """Get max output tokens from config.
+
+        Uses subagent_max_tokens if this is a sub-agent (custom system prompt),
+        otherwise main_max_tokens. Falls back to legacy max_tokens, then defaults.
+        """
         cfg = get_agent_config()
-        return min(cfg.get("max_tokens", 8192), 64000)
+        if self._custom_system_prompt:
+            return min(cfg.get("subagent_max_tokens", cfg.get("max_tokens", 4096)), 64000)
+        return min(cfg.get("main_max_tokens", cfg.get("max_tokens", 8192)), 64000)
 
     def _build_system_prompt(self) -> str:
         """Build system prompt with current context usage stats."""

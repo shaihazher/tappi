@@ -339,7 +339,7 @@ class ResearchSession:
                     {"role": "system", "content": "You are a research report compiler. Write comprehensive, well-structured reports in markdown."},
                     {"role": "user", "content": prompt},
                 ],
-                max_tokens=get_agent_config().get("max_tokens", 8192),
+                max_tokens=get_agent_config().get("main_max_tokens", get_agent_config().get("max_tokens", 8192)),
                 timeout=get_agent_config().get("timeout", 300),
             )
 
