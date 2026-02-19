@@ -22,23 +22,29 @@ _CACHE_TTL = 600  # 10 minutes
 # Hardcoded fallbacks (used when API is unreachable or no key)
 _FALLBACKS: dict[str, list[dict]] = {
     "openrouter": [
+        {"id": "anthropic/claude-sonnet-4-6", "name": "Claude Sonnet 4.6"},
+        {"id": "anthropic/claude-opus-4-6", "name": "Claude Opus 4.6"},
+        {"id": "anthropic/claude-haiku-4-5", "name": "Claude Haiku 4.5"},
         {"id": "anthropic/claude-sonnet-4-20250514", "name": "Claude Sonnet 4"},
         {"id": "anthropic/claude-opus-4-20250514", "name": "Claude Opus 4"},
-        {"id": "anthropic/claude-haiku-4-5-20251212", "name": "Claude Haiku 4.5"},
         {"id": "openai/gpt-4o", "name": "GPT-4o"},
         {"id": "openai/o3-mini", "name": "o3-mini"},
-        {"id": "google/gemini-2.0-flash-001", "name": "Gemini 2.0 Flash"},
+        {"id": "google/gemini-2.5-flash", "name": "Gemini 2.5 Flash"},
         {"id": "deepseek/deepseek-chat", "name": "DeepSeek Chat"},
     ],
     "anthropic": [
+        {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6"},
+        {"id": "claude-opus-4-6", "name": "Claude Opus 4.6"},
+        {"id": "claude-haiku-4-5", "name": "Claude Haiku 4.5"},
         {"id": "claude-sonnet-4-20250514", "name": "Claude Sonnet 4"},
         {"id": "claude-opus-4-20250514", "name": "Claude Opus 4"},
-        {"id": "claude-haiku-4-5-20251212", "name": "Claude Haiku 4.5"},
     ],
     "claude_max": [
+        {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6"},
+        {"id": "claude-opus-4-6", "name": "Claude Opus 4.6"},
+        {"id": "claude-haiku-4-5", "name": "Claude Haiku 4.5"},
         {"id": "claude-sonnet-4-20250514", "name": "Claude Sonnet 4"},
         {"id": "claude-opus-4-20250514", "name": "Claude Opus 4"},
-        {"id": "claude-haiku-4-5-20251212", "name": "Claude Haiku 4.5"},
     ],
     "openai": [
         {"id": "gpt-4o", "name": "GPT-4o"},
@@ -47,6 +53,8 @@ _FALLBACKS: dict[str, list[dict]] = {
         {"id": "gpt-4-turbo", "name": "GPT-4 Turbo"},
     ],
     "bedrock": [
+        {"id": "bedrock/anthropic.claude-sonnet-4-6-v1:0", "name": "Claude Sonnet 4.6 (Bedrock)"},
+        {"id": "bedrock/anthropic.claude-opus-4-6-v1:0", "name": "Claude Opus 4.6 (Bedrock)"},
         {"id": "bedrock/anthropic.claude-sonnet-4-20250514-v1:0", "name": "Claude Sonnet 4 (Bedrock)"},
         {"id": "bedrock/anthropic.claude-opus-4-20250514-v1:0", "name": "Claude Opus 4 (Bedrock)"},
         {"id": "bedrock/anthropic.claude-haiku-4-5-20251212-v1:0", "name": "Claude Haiku 4.5 (Bedrock)"},
@@ -54,8 +62,6 @@ _FALLBACKS: dict[str, list[dict]] = {
         {"id": "bedrock/meta.llama3-1-70b-instruct-v1:0", "name": "Llama 3.1 70B (Bedrock)"},
         {"id": "bedrock/amazon.nova-pro-v1:0", "name": "Amazon Nova Pro (Bedrock)"},
         {"id": "bedrock/amazon.nova-lite-v1:0", "name": "Amazon Nova Lite (Bedrock)"},
-        {"id": "bedrock/mistral.mistral-large-2407-v1:0", "name": "Mistral Large (Bedrock)"},
-        {"id": "bedrock/cohere.command-r-plus-v1:0", "name": "Command R+ (Bedrock)"},
     ],
     "azure": [
         {"id": "azure/gpt-4o", "name": "GPT-4o (Azure)"},
@@ -64,10 +70,11 @@ _FALLBACKS: dict[str, list[dict]] = {
         {"id": "azure/o3-mini", "name": "o3-mini (Azure)"},
     ],
     "vertex": [
+        {"id": "vertex_ai/gemini-2.5-flash", "name": "Gemini 2.5 Flash"},
+        {"id": "vertex_ai/gemini-2.5-pro", "name": "Gemini 2.5 Pro"},
         {"id": "vertex_ai/gemini-2.0-flash", "name": "Gemini 2.0 Flash"},
-        {"id": "vertex_ai/gemini-2.0-pro", "name": "Gemini 2.0 Pro"},
-        {"id": "vertex_ai/gemini-1.5-pro", "name": "Gemini 1.5 Pro"},
-        {"id": "vertex_ai/gemini-1.5-flash", "name": "Gemini 1.5 Flash"},
+        {"id": "vertex_ai/claude-sonnet-4-6@20250619", "name": "Claude Sonnet 4.6 (Vertex)"},
+        {"id": "vertex_ai/claude-opus-4-6@20250619", "name": "Claude Opus 4.6 (Vertex)"},
         {"id": "vertex_ai/claude-sonnet-4@20250514", "name": "Claude Sonnet 4 (Vertex)"},
         {"id": "vertex_ai/claude-opus-4@20250514", "name": "Claude Opus 4 (Vertex)"},
     ],
@@ -261,7 +268,11 @@ def fetch_models(
     try:
         if provider == "openrouter":
             models = _fetch_openrouter(key)
-        elif provider in ("anthropic", "claude_max"):
+        elif provider == "claude_max":
+            # OAuth tokens (sk-ant-oat01-...) don't work with the models API.
+            # Always use the curated fallback list for Claude Max.
+            return _FALLBACKS.get("claude_max", [])
+        elif provider == "anthropic":
             if not key:
                 return _FALLBACKS.get(provider, [])
             models = _fetch_anthropic(key)

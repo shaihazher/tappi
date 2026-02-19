@@ -19,18 +19,18 @@ PROVIDERS = {
     "openrouter": {
         "name": "OpenRouter",
         "env_key": "OPENROUTER_API_KEY",
-        "default_model": "anthropic/claude-sonnet-4-20250514",
+        "default_model": "anthropic/claude-sonnet-4-6",
         "base_url": "https://openrouter.ai/api/v1",
     },
     "anthropic": {
         "name": "Anthropic",
         "env_key": "ANTHROPIC_API_KEY",
-        "default_model": "claude-sonnet-4-20250514",
+        "default_model": "claude-sonnet-4-6",
     },
     "claude_max": {
         "name": "Claude Max (OAuth)",
         "env_key": "ANTHROPIC_API_KEY",
-        "default_model": "claude-sonnet-4-20250514",
+        "default_model": "claude-sonnet-4-6",
         "note": "Uses Claude Code OAuth token (sk-ant-oat01-...) from your Max/Pro subscription",
         "is_oauth": True,
     },
@@ -42,7 +42,7 @@ PROVIDERS = {
     "bedrock": {
         "name": "AWS Bedrock",
         "env_key": "AWS_ACCESS_KEY_ID",
-        "default_model": "bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+        "default_model": "bedrock/anthropic.claude-sonnet-4-6-v1:0",
         "note": "Uses AWS credentials. Configure Access Key + Secret Key + Region, or use env vars / AWS CLI profile.",
         "fields": [
             {"key": "aws_access_key_id", "label": "AWS Access Key ID", "env": "AWS_ACCESS_KEY_ID", "secret": True},
@@ -161,7 +161,7 @@ def get_provider_key(provider: str) -> str | None:
 def get_model() -> str:
     """Get the configured model name."""
     agent_cfg = get_agent_config()
-    return agent_cfg.get("model", "anthropic/claude-sonnet-4-20250514")
+    return agent_cfg.get("model", "claude-sonnet-4-6")
 
 
 def get_workspace() -> Path:
