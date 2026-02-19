@@ -242,6 +242,42 @@ COMMANDS_HELP = {
         "desc": "Wait for a duration (useful in scripts).",
         "example": "  $ tappi wait 2000\n  Waited 2000ms",
     },
+    "click-xy": {
+        "usage": "tappi click-xy <x> <y> [--double] [--right]",
+        "desc": (
+            "Click at page coordinates via CDP Input events.\n\n"
+            "Bypasses all DOM boundaries — works inside cross-origin iframes\n"
+            "(captchas, payment forms, OAuth widgets, embedded content)."
+        ),
+        "example": (
+            "  $ tappi click-xy 125 458\n"
+            "  Clicked at (125, 458)\n\n"
+            "  $ tappi click-xy 300 200 --double\n"
+            "  Double-clicked at (300, 200)"
+        ),
+    },
+    "hover-xy": {
+        "usage": "tappi hover-xy <x> <y>",
+        "desc": "Hover at page coordinates (triggers hover menus, tooltips).",
+        "example": "  $ tappi hover-xy 400 300\n  Hovered at (400, 300)",
+    },
+    "drag-xy": {
+        "usage": "tappi drag-xy <x1> <y1> <x2> <y2>",
+        "desc": "Drag from one coordinate to another (sliders, canvas, drag-and-drop).",
+        "example": "  $ tappi drag-xy 100 200 400 200\n  Dragged from (100, 200) to (400, 200)",
+    },
+    "iframe-rect": {
+        "usage": "tappi iframe-rect <css-selector>",
+        "desc": (
+            "Get bounding box of an iframe element.\n\n"
+            "Returns x, y, width, height, and center coordinates.\n"
+            "Use with click-xy to target elements inside cross-origin iframes."
+        ),
+        "example": (
+            "  $ tappi iframe-rect 'iframe[title*=\"hCaptcha\"]'\n"
+            "  x=95 y=440 w=302 h=76 center=(246, 478)"
+        ),
+    },
 }
 
 
@@ -642,6 +678,34 @@ def run_command(browser: Browser, cmd: str, args: list[str]) -> str | None:
     elif cmd == "wait":
         ms = int(args[0]) if args else 1000
         return browser.wait(ms)
+
+    elif cmd == "click-xy":
+        if len(args) < 2:
+            print_command_help("click-xy")
+            return None
+        coords = [a for a in args if not a.startswith("--")]
+        double = "--double" in args
+        right = "--right" in args
+        return browser.click_xy(float(coords[0]), float(coords[1]), double=double, right=right)
+
+    elif cmd == "hover-xy":
+        if len(args) < 2:
+            print_command_help("hover-xy")
+            return None
+        return browser.hover_xy(float(args[0]), float(args[1]))
+
+    elif cmd == "drag-xy":
+        if len(args) < 4:
+            print_command_help("drag-xy")
+            return None
+        return browser.drag_xy(float(args[0]), float(args[1]), float(args[2]), float(args[3]))
+
+    elif cmd == "iframe-rect":
+        if not args:
+            print_command_help("iframe-rect")
+            return None
+        info = browser.iframe_rect(" ".join(args))
+        return f"x={info['x']} y={info['y']} w={info['width']} h={info['height']} center=({info['cx']}, {info['cy']})"
 
     else:
         print(_red(f"Unknown command: {cmd}"))

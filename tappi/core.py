@@ -751,6 +751,154 @@ class Browser:
         suffix = f" {amount}px" if direction in ("up", "down") else ""
         return f"Scrolled {direction}{suffix}"
 
+    # ── Coordinate-based input (cross-origin iframes, captchas, overlays) ──
+
+    def click_xy(
+        self, x: float, y: float, *, double: bool = False, right: bool = False
+    ) -> str:
+        """Click at page coordinates via CDP Input events.
+
+        Bypasses all DOM boundaries — works inside cross-origin iframes
+        (captchas, payment forms, OAuth widgets). Uses real mouse events.
+
+        Args:
+            x: X coordinate on the page.
+            y: Y coordinate on the page.
+            double: If True, double-click.
+            right: If True, right-click.
+
+        Returns:
+            Confirmation message.
+
+        Example:
+            >>> b.click_xy(125, 458)            # Click inside captcha iframe
+            'Clicked at (125, 458)'
+            >>> b.click_xy(300, 200, double=True)
+            'Double-clicked at (300, 200)'
+        """
+        cdp = self._connect_page()
+        try:
+            button = "right" if right else "left"
+            click_count = 2 if double else 1
+
+            # Move mouse first (triggers hover states)
+            cdp.send("Input.dispatchMouseEvent", type="mouseMoved", x=x, y=y)
+            time.sleep(0.05)
+
+            cdp.send(
+                "Input.dispatchMouseEvent",
+                type="mousePressed", x=x, y=y, button=button, clickCount=click_count,
+            )
+            cdp.send(
+                "Input.dispatchMouseEvent",
+                type="mouseReleased", x=x, y=y, button=button, clickCount=click_count,
+            )
+
+            if double:
+                cdp.send(
+                    "Input.dispatchMouseEvent",
+                    type="mousePressed", x=x, y=y, button=button, clickCount=2,
+                )
+                cdp.send(
+                    "Input.dispatchMouseEvent",
+                    type="mouseReleased", x=x, y=y, button=button, clickCount=2,
+                )
+
+            label = "Double-clicked" if double else ("Right-clicked" if right else "Clicked")
+            return f"{label} at ({x}, {y})"
+        finally:
+            cdp.close()
+
+    def hover_xy(self, x: float, y: float) -> str:
+        """Hover at page coordinates.
+
+        Args:
+            x: X coordinate.
+            y: Y coordinate.
+
+        Returns:
+            Confirmation message.
+        """
+        cdp = self._connect_page()
+        try:
+            cdp.send("Input.dispatchMouseEvent", type="mouseMoved", x=x, y=y)
+            return f"Hovered at ({x}, {y})"
+        finally:
+            cdp.close()
+
+    def drag_xy(
+        self, from_x: float, from_y: float, to_x: float, to_y: float, *, steps: int = 10
+    ) -> str:
+        """Drag from one coordinate to another.
+
+        Args:
+            from_x: Start X.
+            from_y: Start Y.
+            to_x: End X.
+            to_y: End Y.
+            steps: Number of intermediate move events (default: 10).
+
+        Returns:
+            Confirmation message.
+        """
+        cdp = self._connect_page()
+        try:
+            cdp.send("Input.dispatchMouseEvent", type="mouseMoved", x=from_x, y=from_y)
+            time.sleep(0.05)
+            cdp.send(
+                "Input.dispatchMouseEvent",
+                type="mousePressed", x=from_x, y=from_y, button="left", clickCount=1,
+            )
+            time.sleep(0.05)
+
+            for i in range(1, steps + 1):
+                mx = from_x + (to_x - from_x) * (i / steps)
+                my = from_y + (to_y - from_y) * (i / steps)
+                cdp.send(
+                    "Input.dispatchMouseEvent",
+                    type="mouseMoved", x=mx, y=my, button="left",
+                )
+                time.sleep(0.02)
+
+            cdp.send(
+                "Input.dispatchMouseEvent",
+                type="mouseReleased", x=to_x, y=to_y, button="left", clickCount=1,
+            )
+            return f"Dragged from ({from_x}, {from_y}) to ({to_x}, {to_y})"
+        finally:
+            cdp.close()
+
+    def iframe_rect(self, selector: str) -> dict:
+        """Get the bounding box of an iframe element.
+
+        Useful for calculating coordinates for click_xy when targeting
+        elements inside cross-origin iframes.
+
+        Args:
+            selector: CSS selector for the iframe.
+
+        Returns:
+            Dict with x, y, width, height, cx (center x), cy (center y).
+
+        Example:
+            >>> b.iframe_rect('iframe[title*="hCaptcha"]')
+            {'x': 95, 'y': 440, 'width': 302, 'height': 76, 'cx': 246, 'cy': 478}
+        """
+        js = f"""
+        (() => {{
+            const el = document.querySelector({json.dumps(selector)});
+            if (!el) return JSON.stringify({{ error: "Selector not found: " + {json.dumps(selector)} }});
+            el.scrollIntoView({{ block: 'center' }});
+            const r = el.getBoundingClientRect();
+            return JSON.stringify({{ x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height), cx: Math.round(r.x + r.width/2), cy: Math.round(r.y + r.height/2) }});
+        }})()
+        """
+        result = self._eval(js)
+        info = json.loads(result)
+        if "error" in info:
+            raise CDPError(info["error"])
+        return info
+
     # ── File upload ──
 
     def upload(self, file_path: str, selector: str = 'input[type="file"]') -> str:
