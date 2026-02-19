@@ -149,6 +149,7 @@ async def config() -> JSONResponse:
         "browser_profile": cfg.get("browser_profile"),
         "shell_enabled": cfg.get("shell_enabled", True),
         "timeout": cfg.get("timeout", 300),
+        "max_tokens": cfg.get("max_tokens", 8192),
         "configured": is_configured(),
         "credentials": get_provider_credentials_status(),
     }
@@ -493,7 +494,7 @@ async def update_config(body: dict) -> JSONResponse:
     config = load_config()
     agent_cfg = config.get("agent", {})
 
-    allowed = {"model", "shell_enabled", "browser_profile", "timeout"}
+    allowed = {"model", "shell_enabled", "browser_profile", "timeout", "max_tokens"}
     for key in allowed:
         if key in body:
             agent_cfg[key] = body[key]
@@ -636,6 +637,8 @@ async def run_setup(body: dict) -> JSONResponse:
     agent_cfg["shell_enabled"] = shell_enabled
     if body.get("timeout") is not None:
         agent_cfg["timeout"] = int(body["timeout"])
+    if body.get("max_tokens") is not None:
+        agent_cfg["max_tokens"] = min(int(body["max_tokens"]), 64000)
 
     # Browser profile — create if needed
     if browser_profile:
@@ -1420,6 +1423,11 @@ _FALLBACK_HTML = """\
           <label>Subagent Timeout (seconds)</label>
           <input type="number" id="cfg-timeout" min="30" max="3600" value="300">
           <p style="font-size:11px;color:var(--text-dim);margin-top:4px">Max time per LLM call. Orphaned threads are killed after this.</p>
+        </div>
+        <div class="field">
+          <label>Max Output Tokens</label>
+          <input type="number" id="cfg-max-tokens" min="1024" max="64000" value="8192">
+          <p style="font-size:11px;color:var(--text-dim);margin-top:4px">Max tokens per LLM response. Higher = longer responses but more cost.</p>
         </div>
       </div>
       <button class="btn" onclick="saveSettings()" style="width:100%;padding:10px">Save Settings</button>
@@ -2393,6 +2401,7 @@ async function loadSettingsPage() {
   // Shell
   document.getElementById('cfg-shell').checked = cfg.shell_enabled !== false;
   document.getElementById('cfg-timeout').value = cfg.timeout || 300;
+  document.getElementById('cfg-max-tokens').value = cfg.max_tokens || 8192;
 
   // Profiles dropdown
   const pres = await fetch('/api/profiles');
@@ -2447,8 +2456,9 @@ async function saveSettings() {
   const shell_enabled = document.getElementById('cfg-shell').checked;
   const browser_profile = document.getElementById('cfg-profile').value;
   const timeout = parseInt(document.getElementById('cfg-timeout').value) || 300;
+  const max_tokens = parseInt(document.getElementById('cfg-max-tokens').value) || 8192;
 
-  const body = { provider, model, workspace, browser_profile, shell_enabled, timeout };
+  const body = { provider, model, workspace, browser_profile, shell_enabled, timeout, max_tokens };
 
   // Collect credentials
   if (info.fields) {

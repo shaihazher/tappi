@@ -162,6 +162,11 @@ class Agent:
         cfg = get_agent_config()
         return cfg.get("timeout", 300)
 
+    def _get_max_tokens(self) -> int:
+        """Get max output tokens from config (default 8192, max 64000)."""
+        cfg = get_agent_config()
+        return min(cfg.get("max_tokens", 8192), 64000)
+
     def _build_system_prompt(self) -> str:
         """Build system prompt with current context usage stats."""
         from datetime import date as _date
@@ -241,7 +246,7 @@ class Agent:
             messages=messages,
             tools=self._tool_schemas,
             tool_choice="auto",
-            max_tokens=4096,
+            max_tokens=self._get_max_tokens(),
             timeout=self._get_timeout(),
         )
 
