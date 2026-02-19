@@ -584,7 +584,8 @@ _FALLBACK_HTML = """\
   header .status { font-size: 12px; color: var(--text-dim); margin-left: auto; }
 
   /* Pages */
-  .page { flex: 1; display: none; flex-direction: column; overflow: hidden; }
+  .page { flex: 1; display: none; flex-direction: column; overflow: hidden;
+    min-height: 0; }
   .page.active { display: flex; }
 
   /* Chat page */
@@ -616,7 +617,8 @@ _FALLBACK_HTML = """\
   #send:disabled { opacity: 0.4; cursor: default; }
 
   /* Settings / config pages */
-  .page-content { flex: 1; overflow-y: auto; padding: 24px 32px; max-width: 700px; }
+  .page-content { flex: 1; overflow-y: auto; padding: 24px 32px; max-width: 700px;
+    padding-bottom: 80px; }
   .card { background: var(--surface); border: 1px solid var(--border);
     border-radius: 10px; padding: 20px; margin-bottom: 16px; }
   .card h3 { font-size: 14px; margin-bottom: 12px; color: var(--text); }
