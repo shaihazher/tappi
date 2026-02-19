@@ -808,5 +808,124 @@ class Browser:
         time.sleep(ms / 1000)
         return f"Waited {ms}ms"
 
+    # ── Launch Chrome ──
+
+    @staticmethod
+    def launch(
+        port: int = 9222,
+        user_data_dir: str | None = None,
+        headless: bool = False,
+        chrome_path: str | None = None,
+    ) -> subprocess.Popen:
+        """Launch Chrome/Chromium with remote debugging enabled.
+
+        Creates a separate browser instance with its own profile directory.
+        Your logins, cookies, and extensions in that profile persist across
+        restarts — log in once, automate forever.
+
+        Args:
+            port: CDP port (default: 9222).
+            user_data_dir: Where to store the browser profile. Default:
+                           ~/.browser-py/profile
+            headless: Run without a visible window (default: False).
+                      Set True for server/CI environments.
+            chrome_path: Path to Chrome/Chromium binary. Auto-detected if
+                         not provided.
+
+        Returns:
+            The subprocess.Popen object for the browser process.
+
+        Example:
+            >>> Browser.launch()           # Start Chrome, default profile
+            >>> Browser.launch(port=9333)  # Different port
+            >>> b = Browser("http://127.0.0.1:9333")
+        """
+        chrome = chrome_path or _find_chrome()
+        if not chrome:
+            raise FileNotFoundError(
+                "Chrome/Chromium not found. Install it or pass chrome_path=...\n\n"
+                "Install options:\n"
+                "  macOS:   brew install --cask google-chrome\n"
+                "  Ubuntu:  sudo apt install chromium-browser\n"
+                "  Fedora:  sudo dnf install chromium"
+            )
+
+        data_dir = user_data_dir or os.path.join(
+            Path.home(), ".browser-py", "profile"
+        )
+        os.makedirs(data_dir, exist_ok=True)
+
+        cmd = [
+            chrome,
+            f"--remote-debugging-port={port}",
+            f"--user-data-dir={data_dir}",
+        ]
+        if headless:
+            cmd.append("--headless=new")
+
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # Wait for CDP to be ready
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            try:
+                json.loads(urlopen(f"http://127.0.0.1:{port}/json/version").read())
+                return proc
+            except (URLError, OSError):
+                time.sleep(0.3)
+
+        proc.kill()
+        raise TimeoutError(
+            f"Chrome started but CDP not ready on port {port} after 10s.\n"
+            f"Check if another process is using port {port}."
+        )
+
     def __repr__(self) -> str:
         return f"Browser(cdp_url={self.cdp_url!r})"
+
+
+def _find_chrome() -> str | None:
+    """Auto-detect Chrome/Chromium binary path."""
+    candidates = []
+
+    if sys.platform == "darwin":
+        candidates = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        ]
+    elif sys.platform == "linux":
+        candidates = [
+            "google-chrome",
+            "google-chrome-stable",
+            "chromium",
+            "chromium-browser",
+            "brave-browser",
+            "microsoft-edge",
+        ]
+    elif sys.platform == "win32":
+        import glob
+        for pattern in [
+            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+        ]:
+            candidates.extend(glob.glob(pattern))
+
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+        # For linux — check PATH
+        if not os.path.sep in c:
+            import shutil
+            found = shutil.which(c)
+            if found:
+                return found
+
+    return None

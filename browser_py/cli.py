@@ -19,7 +19,7 @@ import sys
 import os
 import textwrap
 
-from browser_py.core import Browser, CDPError, BrowserNotRunning
+from browser_py.core import Browser, CDPError, BrowserNotRunning, _find_chrome
 
 
 # ── Colors (disable with NO_COLOR env var) ──
@@ -54,6 +54,30 @@ def _red(s: str) -> str:
 # ── Help text ──
 
 COMMANDS_HELP = {
+    "launch": {
+        "usage": "browser-py launch [--port PORT] [--user-data-dir PATH] [--headless]",
+        "desc": (
+            "Start Chrome with remote debugging enabled.\n\n"
+            "Creates a separate browser profile at ~/.browser-py/profile so it\n"
+            "doesn't interfere with your regular Chrome. Your logins and cookies\n"
+            "in this profile persist across restarts.\n\n"
+            "First time: a fresh Chrome window opens — log into your sites.\n"
+            "Next time: same command, all your sessions are still there."
+        ),
+        "example": (
+            "  $ browser-py launch\n"
+            "  ✓ Chrome launched on port 9222\n"
+            "    Profile: ~/.browser-py/profile\n\n"
+            "  $ browser-py launch --port 9333\n"
+            "  ✓ Chrome launched on port 9333\n\n"
+            "  $ browser-py launch --headless   # No visible window (for servers)"
+        ),
+        "hint": (
+            "First launch? A Chrome window will open. Log into the sites you\n"
+            "want to automate (Gmail, GitHub, etc.). Close the window when done.\n"
+            "Next time you launch, those sessions are still active."
+        ),
+    },
     "tabs": {
         "usage": "browser-py tabs",
         "desc": "List all open browser tabs with their index, title, and URL.",
@@ -216,6 +240,12 @@ def print_main_help() -> None:
     # Group commands
     groups = [
         (
+            "Setup",
+            [
+                ("launch", "Start Chrome with remote debugging"),
+            ],
+        ),
+        (
             "Navigation",
             [
                 ("open <url>", "Go to a URL"),
@@ -300,6 +330,79 @@ def print_command_help(cmd: str) -> None:
 
 
 # ── Command dispatch ──
+
+
+def run_launch(args: list[str]) -> str:
+    """Handle the launch command with its own arg parsing."""
+    import os
+    from pathlib import Path
+
+    port = 9222
+    user_data_dir = None
+    headless = False
+    chrome_path = None
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg in ("--port", "-p") and i + 1 < len(args):
+            port = int(args[i + 1])
+            i += 2
+        elif arg in ("--user-data-dir", "--profile", "-d") and i + 1 < len(args):
+            user_data_dir = args[i + 1]
+            i += 2
+        elif arg in ("--headless",):
+            headless = True
+            i += 1
+        elif arg in ("--chrome", "--browser") and i + 1 < len(args):
+            chrome_path = args[i + 1]
+            i += 2
+        else:
+            i += 1
+
+    data_dir = user_data_dir or os.path.join(Path.home(), ".browser-py", "profile")
+
+    # Check if port is already in use
+    from urllib.request import urlopen
+    from urllib.error import URLError
+    try:
+        import json
+        json.loads(urlopen(f"http://127.0.0.1:{port}/json/version", timeout=2).read())
+        return (
+            f"✓ Browser already running on port {port}\n"
+            f"  {_dim('Ready to use — try: browser-py tabs')}"
+        )
+    except (URLError, OSError):
+        pass
+
+    is_first_launch = not os.path.exists(os.path.join(data_dir, "Default"))
+
+    Browser.launch(
+        port=port,
+        user_data_dir=user_data_dir,
+        headless=headless,
+        chrome_path=chrome_path,
+    )
+
+    lines = [
+        f"✓ Chrome launched on port {_bold(str(port))}",
+        f"  Profile: {_dim(data_dir)}",
+    ]
+
+    if is_first_launch:
+        lines.append("")
+        lines.append(_yellow("⚡ First launch — a fresh Chrome window opened."))
+        lines.append("   Log into the sites you want to automate (Gmail, GitHub, etc.).")
+        lines.append("   Those sessions will persist for all future launches.")
+        lines.append("")
+        lines.append(_dim("   When ready, open another terminal and run:"))
+        lines.append(_dim("   browser-py tabs"))
+    else:
+        lines.append("")
+        lines.append(_dim("Ready — your saved sessions are active."))
+        lines.append(_dim(f"Try: browser-py tabs"))
+
+    return "\n".join(lines)
 
 
 def run_command(browser: Browser, cmd: str, args: list[str]) -> str | None:
@@ -442,17 +545,28 @@ def main() -> None:
         print(f"browser-py {__version__}")
         return
 
-    browser = Browser()
-
     try:
+        # Launch doesn't need an existing browser connection
+        if cmd == "launch":
+            result = run_launch(cmd_args)
+            if result:
+                print(result)
+            return
+
+        browser = Browser()
         result = run_command(browser, cmd, cmd_args)
         if result is not None:
             print(result)
     except BrowserNotRunning as e:
         print(_red("✗ Browser not running\n"))
         print(str(e))
+        print()
+        print(_yellow("💡 Quick fix:") + " run " + _bold("browser-py launch") + " to start Chrome with remote debugging.")
         sys.exit(1)
     except CDPError as e:
+        print(_red(f"✗ {e}"))
+        sys.exit(1)
+    except FileNotFoundError as e:
         print(_red(f"✗ {e}"))
         sys.exit(1)
     except KeyboardInterrupt:

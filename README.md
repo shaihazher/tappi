@@ -10,18 +10,36 @@ Lightweight Python library and CLI to control Chrome/Chromium via the [Chrome De
 pip install browser-py
 ```
 
+## Setup (One-Time)
+
+```bash
+# Step 1: Launch a browser with remote debugging
+browser-py launch
+```
+
+That's it. A Chrome window opens with its own profile at `~/.browser-py/profile`.
+
+**First time?** Log into the sites you want to automate — Gmail, GitHub, Reddit, whatever. Those sessions persist. Next time you run `browser-py launch`, everything is still logged in.
+
+**Why a separate profile?** Chrome locks its profile — only one instance can use it. So browser-py creates its own. Your main Chrome stays untouched.
+
+**Options:**
+```bash
+browser-py launch                          # Default: port 9222
+browser-py launch --port 9333              # Custom port
+browser-py launch --user-data-dir ~/my-profile  # Custom profile location
+browser-py launch --headless               # No visible window (servers/CI)
+```
+
 ## Quick Start
 
 ### CLI
 
 ```bash
-# Start Chrome with remote debugging
-chrome --remote-debugging-port=9222
+# Terminal 1: Launch the browser (keep it running)
+browser-py launch
 
-# Or with a persistent profile (recommended — keeps your logins):
-chrome --remote-debugging-port=9222 --user-data-dir=~/.browser-py-data
-
-# Now control it:
+# Terminal 2: Control it
 browser-py open github.com          # Navigate
 browser-py elements                 # See what's clickable
 browser-py click 3                  # Click element [3]
@@ -74,6 +92,7 @@ browser-py automatically **pierces shadow DOM boundaries**. Sites using web comp
 
 | Command | Description |
 |---------|-------------|
+| `launch` | Start Chrome with remote debugging |
 | `tabs` | List open tabs |
 | `open <url>` | Navigate to URL |
 | `tab <index>` | Switch to tab |
