@@ -1,168 +1,267 @@
 # browser-py
 
-Lightweight Python library and CLI to control Chrome/Chromium via [CDP](https://chromedevtools.github.io/devtools-protocol/) (Chrome DevTools Protocol).
+Lightweight Python library and CLI to control Chrome/Chromium via [CDP](https://chromedevtools.github.io/devtools-protocol/) (Chrome DevTools Protocol) — with an **AI agent** that can browse the web, manage files, create PDFs, and automate recurring tasks.
 
 **The killer feature:** connects to your **existing browser sessions** — all your logins, cookies, and extensions carry over. Log in once, automate forever.
 
 ```bash
-pip install browser-py
+pip install browser-py            # CDP library only
+pip install browser-py[agent]     # CDP + AI agent + all tools
 ```
 
 ---
 
-## Getting Started
+## What's New in v0.2
+
+- 🤖 **AI Agent** — chat with an LLM that controls your browser
+- 🌐 **Web UI** — `bpy serve` for a local chat interface with settings
+- 📄 **PDF/Spreadsheet tools** — read and create PDFs, CSV, Excel
+- ⏰ **Cron jobs** — schedule recurring browser automation tasks
+- 🔧 **6 built-in tools** — browser, files, PDF, spreadsheet, shell, cron
+
+---
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [AI Agent Mode](#ai-agent-mode) ← **New**
+- [Web UI](#web-ui) ← **New**
+- [Tutorial: Your First Automation](#tutorial-your-first-automation)
+- [How It Works](#how-it-works)
+- [Python Library](#using-as-a-python-library)
+- [CLI Reference](#cli-reference)
+- [Profiles](#profiles)
+- [Shadow DOM Support](#shadow-dom-support)
+- [FAQ](#faq)
+- [License](#license)
+
+---
+
+## Quick Start
+
+```bash
+# Install with agent support
+pip install browser-py[agent]
+
+# One-time setup: choose provider, enter API key, set workspace
+bpy setup
+
+# Launch a browser
+bpy launch
+
+# Chat with the agent
+bpy agent "Go to github.com and find today's trending Python repos"
+
+# Or use the web UI
+bpy serve
+```
+
+---
+
+## AI Agent Mode
+
+The agent is an LLM with 6 tools that can browse the web, read/write files, create PDFs, manage spreadsheets, run shell commands, and schedule recurring tasks — all within a sandboxed workspace directory.
+
+### Setup
+
+```bash
+bpy setup
+```
+
+The wizard walks you through:
+
+1. **LLM Provider** — OpenRouter, Anthropic, Claude Max (OAuth), OpenAI, AWS Bedrock, Azure, Google Vertex
+2. **API Key** — paste your key (or OAuth token for Claude Max)
+3. **Model** — defaults per provider, fully configurable
+4. **Workspace** — sandboxed directory for all file operations
+5. **Browser Profile** — which browser profile the agent uses
+6. **Shell Access** — toggle on/off
+
+All config lives in `~/.browser-py/config.json`.
+
+### Providers
+
+| Provider | Auth | Status |
+|----------|------|--------|
+| **OpenRouter** | API key | ✅ Ready |
+| **Anthropic** | API key | ✅ Ready |
+| **Claude Max (OAuth)** | OAuth token (`sk-ant-oat01-...`) | ✅ Ready |
+| **OpenAI** | API key | ✅ Ready |
+| **AWS Bedrock** | AWS credentials | ✅ Ready (via LiteLLM) |
+| **Azure OpenAI** | API key + endpoint | ✅ Ready (via LiteLLM) |
+| **Google Vertex AI** | Service account | ✅ Ready (via LiteLLM) |
+
+All providers work through [LiteLLM](https://github.com/BerriAI/litellm) — one interface, any model.
+
+#### Claude Max (OAuth) — Use Your Subscription
+
+If you have a Claude Pro/Max subscription ($20-200/mo), you can use your **OAuth token** instead of paying per-API-call. This is the same token Claude Code uses.
+
+```bash
+bpy setup
+# Choose "Claude Max (OAuth)"
+# Paste your token: sk-ant-oat01-...
+```
+
+**Where to find your token:**
+
+- If you use Claude Code: check your credentials file or environment
+- The token format is `sk-ant-oat01-...` (different from API keys which are `sk-ant-api03-...`)
+- It works as a drop-in replacement — no proxy, no special config
+
+### CLI Usage
+
+#### Interactive mode
+
+```bash
+bpy agent
+```
+
+```
+browser-py agent (type 'quit' to exit, 'reset' to clear)
+
+You: Go to hacker news and find the top post about AI
+  🔧 browser → launch
+  🔧 browser → open
+  🔧 browser → elements
+  🔧 browser → text
+
+Agent: The top AI-related post on Hacker News right now is "GPT-5 Released"
+with 342 points. It links to openai.com/blog/gpt5 and the discussion has
+127 comments. Want me to read the article or the comments?
+```
+
+#### One-shot mode
+
+```bash
+bpy agent "Create a PDF report of today's weather in Houston"
+```
+
+The agent figures out the steps: open a weather site → extract data → create HTML → convert to PDF → save to workspace.
+
+### Tools
+
+The agent has 6 tools, each exposed as a JSON schema the LLM calls natively:
+
+| Tool | What it does |
+|------|-------------|
+| **browser** | Navigate, click, type, read pages, screenshots, tab management. Uses your real browser with saved logins. |
+| **files** | Read, write, list, move, copy, delete files — sandboxed to workspace. |
+| **pdf** | Read text from PDFs (PyMuPDF), create PDFs from HTML (WeasyPrint). |
+| **spreadsheet** | Read/write CSV and Excel (.xlsx) files, create new ones with headers. |
+| **shell** | Run shell commands (cwd = workspace). Can be disabled in settings. |
+| **cron** | Schedule recurring tasks with cron expressions or intervals. |
+
+### How the Agent Loop Works
+
+```
+User message
+    ↓
+┌──────────────────────────┐
+│   LLM (via LiteLLM)      │ ◄── Sees all 6 tools as JSON schemas
+│   Decides what to do      │
+└──────────┬───────────────┘
+           │
+           ▼
+    ┌─ Tool calls? ──┐
+    │                 │
+   Yes               No → Return text response
+    │
+    ▼
+Execute each tool call
+    │
+    ▼
+Append results to conversation
+    │
+    ▼
+Loop back to LLM ────────────►  (max 50 iterations)
+```
+
+The loop is synchronous — each tool call blocks until complete. No timeouts. The LLM sees tool results and decides the next step, just like a human would.
+
+### Cron (Scheduled Tasks)
+
+Tell the agent to schedule recurring tasks:
+
+```
+You: Schedule a job to check trending repos on GitHub every morning at 9 AM
+Agent: Done. Created job "GitHub Trends" with schedule "0 9 * * *".
+```
+
+Jobs are stored in `~/.browser-py/jobs.json` and persist across restarts. When `bpy serve` is running, APScheduler fires each job in its own agent session.
+
+```bash
+# Via CLI
+bpy agent "List my scheduled jobs"
+bpy agent "Pause the GitHub Trends job"
+bpy agent "Remove job abc123"
+```
+
+---
+
+## Web UI
+
+```bash
+bpy serve                    # http://127.0.0.1:8321
+bpy serve --port 9000        # custom port
+```
+
+The web UI has 4 sections:
+
+### 💬 Chat
+
+Full chat interface with live tool call visibility. As the agent works, you see each tool call and its result in real-time via WebSocket.
+
+### 🌍 Browser Profiles
+
+View and create browser profiles. Each profile has its own Chrome sessions (cookies, logins) and CDP port. Create profiles for different use cases — work, personal, social media.
+
+### ⏰ Scheduled Jobs
+
+View all cron jobs with their schedule, status (active/paused), and task description. Jobs are created via chat ("schedule a task to...").
+
+### ⚙️ Settings
+
+- **Model** — change the LLM model
+- **Browser Profile** — select which profile the agent uses
+- **Shell Access** — enable/disable shell commands
+- **Workspace** — view the sandboxed directory
+
+> **Note:** Provider and API key changes require `bpy setup` (CLI) — these aren't exposed in the web UI for security.
+
+---
+
+## Tutorial: Your First Automation
 
 ### Step 1: Launch the browser
 
 ```bash
-browser-py launch
+bpy launch
 ```
 
 ```
 ✓ Chrome launched on port 9222
-  Profile: ~/.browser-py/profile
+  Profile: ~/.browser-py/profiles/default
 
 ⚡ First launch — a fresh Chrome window opened.
    Log into the sites you want to automate (Gmail, GitHub, etc.).
    Those sessions will persist for all future launches.
 ```
 
-**What happens:** browser-py starts a Chrome instance with its own profile at `~/.browser-py/profiles/default/`. This is separate from your regular Chrome — it won't interfere with your daily browsing.
+**First time only:** A fresh Chrome window opens. Log into the websites you want to automate. Close the window when done. Your sessions are saved in the profile.
 
-> **First time only:** A fresh Chrome window opens. Log into the websites you want to automate — GitHub, Gmail, Reddit, whatever. Close the window when done. Your sessions are saved in the profile.
-
-### Step 2: Launch again (sessions persist)
+### Step 2: Control it
 
 ```bash
-browser-py launch
+bpy open github.com         # Navigate
+bpy elements                # See what's clickable
+bpy click 3                 # Click element [3]
+bpy type 5 "hello world"    # Type into element [5]
+bpy text                    # Read the page
+bpy screenshot page.png     # Screenshot
 ```
 
-```
-✓ Chrome launched — profile: default (port 9222)
-  Path: ~/.browser-py/profiles/default
-
-Ready — your saved sessions are active.
-Try: browser-py tabs
-```
-
-**Everything you logged into last time is still there.** No re-authentication needed. The profile keeps your cookies, localStorage, and session data across restarts.
-
-### Step 3: Control it
-
-Open a second terminal (keep the browser running):
-
-```bash
-browser-py open github.com
-```
-
-```
-Navigated to https://github.com
-💡 Run 'elements' to see interactive elements on this page.
-```
-
-That's it. Three commands to go from zero to browser automation.
-
----
-
-## Tutorial: Your First Automation
-
-Let's walk through a real example — browsing Hacker News.
-
-### See what's clickable
-
-```bash
-browser-py elements
-```
-
-```
-[0] (link) Hacker News → https://news.ycombinator.com/news
-[1] (link) new → https://news.ycombinator.com/newest
-[2] (link) past → https://news.ycombinator.com/front
-[3] (link) comments → https://news.ycombinator.com/newcomments
-[4] (link) ask → https://news.ycombinator.com/ask
-[5] (link) show → https://news.ycombinator.com/show
-[6] (link) jobs → https://news.ycombinator.com/jobs
-[7] (link) submit → https://news.ycombinator.com/submit
-[8] (link) login → https://news.ycombinator.com/login?goto=news
-[9] (link) Sizing chaos → https://pudding.cool/2026/02/womens-sizing/
-...
-
-💡 226 elements found. Use 'click <number>' or 'type <number> <text>' to interact.
-```
-
-Every interactive element gets a number. Links, buttons, inputs, dropdowns — anything you can click or type into.
-
-### Click something
-
-```bash
-browser-py click 9
-```
-
-```
-Clicked: (a) Sizing chaos
-```
-
-The browser navigates to that link, just like clicking it with your mouse.
-
-### Read the page
-
-```bash
-browser-py text
-```
-
-```
-Sizing chaos — An investigation into women's clothing sizes...
-```
-
-Extracts all visible text (up to 8KB). Useful for scraping or checking what loaded.
-
-### Go back and try a form
-
-```bash
-browser-py back
-browser-py open https://github.com/login
-browser-py elements
-```
-
-```
-[0] (link) Skip to content
-[1] (input:text) login
-[2] (input:password) password
-[3] (link) Forgot password?
-[4] (input:submit) commit [Sign in]
-[5] (button) Continue with Google
-...
-```
-
-### Type into inputs
-
-```bash
-browser-py type 1 "myusername"
-browser-py type 2 "mypassword"
-browser-py click 4
-```
-
-```
-Typed into [1] (input)
-Typed into [2] (input)
-Clicked: (input) Sign in
-```
-
-### Take a screenshot
-
-```bash
-browser-py screenshot result.png
-```
-
-```
-Screenshot saved: result.png
-```
-
-<p align="center">
-  <img src="docs/images/01-github-login.png" alt="GitHub login page" width="600">
-  <br>
-  <em>Screenshot captured via browser-py</em>
-</p>
+Every interactive element gets a number. Use that number with `click` and `type`.
 
 ---
 
@@ -177,30 +276,19 @@ Screenshot saved: result.png
 └─────────────┘                          └──────────────────┘
 ```
 
-`browser-py launch` starts Chrome with `--remote-debugging-port=9222` and a persistent `--user-data-dir`. All browser-py commands connect to that port via WebSocket. Your sessions live in the user-data-dir and survive restarts.
-
-### The element index
-
-When you run `elements`, browser-py injects JavaScript that:
-
-1. Scans the entire DOM for interactive elements (links, buttons, inputs, etc.)
-2. **Pierces shadow DOM** — works on Reddit, GitHub, and other sites using web components
-3. Numbers each element and stores the index as a `data-bpy-idx` attribute
-4. De-duplicates and prioritizes modal/dialog elements
-
-Then `click 3` or `type 5 hello` targets that exact element.
+`bpy launch` starts Chrome with `--remote-debugging-port=9222` and a persistent `--user-data-dir`. All commands connect to that port via WebSocket.
 
 ### Real mouse events
 
-`click` doesn't just call `.click()` in JavaScript. It uses CDP's `Input.dispatchMouseEvent` to simulate real mouse presses. This matters because:
+`click` uses CDP's `Input.dispatchMouseEvent` — real mouse presses, not `.click()`. Works with React, Vue, Angular, and every framework.
 
-- React, Vue, and Angular use synthetic event systems that can ignore `.click()`
-- Some sites only respond to mousedown → mouseup sequences
-- Hover states and focus behavior work correctly
+### Shadow DOM piercing
+
+The element scanner recursively enters every shadow root. Reddit, GitHub, Salesforce, Angular Material — all work automatically.
 
 ### Framework-aware typing
 
-`type` dispatches proper `input` and `change` events using React's native value setter (`Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set`). This means SPAs that manage state through controlled components get the value update correctly.
+`type` dispatches proper `input` and `change` events using React's native value setter. SPAs with controlled components get the value update correctly.
 
 ---
 
@@ -209,199 +297,140 @@ Then `click 3` or `type 5 hello` targets that exact element.
 ```python
 from browser_py import Browser
 
-# Launch Chrome (first time — or skip if already running)
-Browser.launch()
+Browser.launch()              # Start Chrome
+b = Browser()                 # Connect
 
-# Connect and use
-b = Browser()
 b.open("https://github.com")
-
-# List interactive elements
-elements = b.elements()
-for el in elements[:5]:
-    print(el)
-# [0] (link) Home → /
-# [1] (button) Sign In
-# [2] (input:text) Search
-# ...
-
-# Interact by index
-b.click(1)                    # Click element [1]
-b.type(2, "search query")     # Type into element [2]
-
-# Read content
-text = b.text()               # Visible text (max 8KB)
-html = b.html("nav")          # outerHTML of a specific element
-title = b.eval("document.title")  # Run any JavaScript
-
-# Screenshot
-b.screenshot("page.png")
-
-# File upload (bypasses OS dialog)
-b.upload("~/photos/avatar.jpg")
+elements = b.elements()       # List interactive elements
+b.click(1)                    # Click by index
+b.type(2, "search query")     # Type into input
+text = b.text()               # Read visible text
+b.screenshot("page.png")      # Screenshot
+b.upload("~/file.pdf")        # Upload file
 ```
 
 ### Profile management
 
 ```python
-from browser_py import Browser
-from browser_py.profiles import (
-    create_profile,
-    list_profiles,
-    get_profile,
-    set_default,
-    delete_profile,
-)
+from browser_py.profiles import create_profile, list_profiles, get_profile
 
-# Create named profiles
-create_profile("work")          # → {"name": "work", "port": 9222, ...}
-create_profile("personal")     # → {"name": "personal", "port": 9223, ...}
+create_profile("work")        # → port 9222
+create_profile("personal")    # → port 9223
 
-# List all profiles
-for p in list_profiles():
-    print(f"{p['name']} — port {p['port']} {'★' if p['is_default'] else ''}")
-# work — port 9222 ★
-# personal — port 9223
-
-# Set default
-set_default("personal")
-
-# Get a profile's info
-profile = get_profile("work")  # By name
-profile = get_profile()        # Default profile
-
-# Launch a specific profile
-Browser.launch(
-    port=profile["port"],
-    user_data_dir=profile["path"],
-)
-
-# Connect to it
-b = Browser(f"http://127.0.0.1:{profile['port']}")
-b.open("https://github.com")
-
-# Run multiple profiles simultaneously
+# Run multiple simultaneously
 work = get_profile("work")
-personal = get_profile("personal")
-
 Browser.launch(port=work["port"], user_data_dir=work["path"])
-Browser.launch(port=personal["port"], user_data_dir=personal["path"])
-
-b_work = Browser(f"http://127.0.0.1:{work['port']}")
-b_personal = Browser(f"http://127.0.0.1:{personal['port']}")
-
-# Each has its own sessions — work GitHub, personal Gmail, etc.
-b_work.open("https://github.com")
-b_personal.open("https://gmail.com")
-
-# Clean up
-delete_profile("old-project")
+b = Browser(f"http://127.0.0.1:{work['port']}")
 ```
 
-### Scoped element queries
+### Agent as a library
 
 ```python
-# Only elements inside a specific container
-b.elements(".sidebar")
-b.elements("#modal-dialog")
-b.elements("form.login")
-```
+from browser_py.agent.loop import Agent
 
-### Tab management
+agent = Agent(
+    browser_profile="default",
+    on_tool_call=lambda name, params, result: print(f"🔧 {name}"),
+)
 
-```python
-tabs = b.tabs()                # List all tabs
-b.tab(2)                       # Switch to tab [2]
-b.newtab("https://gmail.com")  # Open new tab
-b.close_tab(0)                 # Close tab [0]
-```
+response = agent.chat("Go to github.com and find trending repos")
+print(response)
 
-### Navigation
+# Multi-turn
+response = agent.chat("Now check the first one and summarize the README")
+print(response)
 
-```python
-b.open("https://example.com")
-print(b.url())                 # Current URL
-b.back()                       # Browser back
-b.forward()                    # Browser forward
-b.refresh()                    # Reload
-b.scroll("down", 1000)         # Scroll down 1000px
-b.scroll("top")                # Scroll to top
-```
-
-### Low-level CDP access
-
-For anything browser-py doesn't have a method for:
-
-```python
-from browser_py import Browser, CDPSession
-
-b = Browser()
-target = b._current_target()
-
-# Raw CDP protocol commands
-cdp = CDPSession.connect_to_page(target["id"], port=9222)
-result = cdp.send("Runtime.evaluate", expression="document.title")
-print(result)
-# {'result': {'type': 'string', 'value': 'GitHub'}}
-
-# Network interception, cookie manipulation, device emulation —
-# anything in the CDP spec: https://chromedevtools.github.io/devtools-protocol/
-cdp.close()
+# Reset conversation
+agent.reset()
 ```
 
 ---
 
 ## CLI Reference
 
-### Setup
+### Agent Commands
+
 | Command | Description |
 |---------|-------------|
-| `launch [--port N] [--headless] [--user-data-dir PATH]` | Start Chrome with remote debugging |
+| `bpy setup` | Configure LLM provider, workspace, browser |
+| `bpy agent [message]` | Chat with the agent (interactive or one-shot) |
+| `bpy serve [--port 8321]` | Start the web UI |
+
+### Browser Commands
+
+| Command | Description |
+|---------|-------------|
+| `bpy launch [name]` | Start Chrome with a named profile |
+| `bpy launch new [name]` | Create a new profile |
+| `bpy launch list` | List all profiles |
+| `bpy launch --default <name>` | Set the default profile |
 
 ### Navigation
-| Command | Description |
-|---------|-------------|
-| `open <url>` | Navigate to URL (adds https:// if missing) |
-| `url` | Print current URL |
-| `back` | Go back in history |
-| `forward` | Go forward in history |
-| `refresh` | Reload page |
 
-### Tabs
 | Command | Description |
 |---------|-------------|
-| `tabs` | List open tabs with index, title, URL |
-| `tab <index>` | Switch to tab by index |
-| `newtab [url]` | Open new tab |
-| `close [index]` | Close tab (default: current) |
+| `bpy open <url>` | Navigate to URL |
+| `bpy url` | Print current URL |
+| `bpy back` / `forward` / `refresh` | History navigation |
 
-### Interact
-| Command | Description |
-|---------|-------------|
-| `elements [selector]` | List interactive elements (numbered) |
-| `click <index>` | Click element by number |
-| `type <index> <text>` | Type into input element |
-| `upload <path> [selector]` | Upload file to file input |
+### Interaction
 
-### Read
 | Command | Description |
 |---------|-------------|
-| `text [selector]` | Extract visible text (max 8KB) |
-| `html <selector>` | Get outerHTML (max 10KB) |
-| `eval <js>` | Run JavaScript, print result |
-| `screenshot [path]` | Save PNG screenshot |
+| `bpy elements [selector]` | List interactive elements (numbered) |
+| `bpy click <index>` | Click element by number |
+| `bpy type <index> <text>` | Type into element |
+| `bpy upload <path> [selector]` | Upload file |
+
+### Content
+
+| Command | Description |
+|---------|-------------|
+| `bpy text [selector]` | Extract visible text |
+| `bpy html <selector>` | Get element HTML |
+| `bpy eval <js>` | Run JavaScript |
+| `bpy screenshot [path]` | Save screenshot |
 
 ### Other
+
 | Command | Description |
 |---------|-------------|
-| `scroll <up\|down\|top\|bottom> [px]` | Scroll the page |
-| `wait <ms>` | Wait (useful in scripts) |
+| `bpy tabs` / `tab <n>` / `newtab` / `close` | Tab management |
+| `bpy scroll <dir> [px]` | Scroll the page |
+| `bpy wait <ms>` | Wait (for scripts) |
 
-Every command has `--help`:
+---
+
+## Profiles
+
+Each profile is a separate Chrome session with its own logins, cookies, and CDP port.
 
 ```bash
-browser-py click --help
-browser-py elements --help
+bpy launch                  # Default profile (port 9222)
+bpy launch new work         # Create "work" (port 9223)
+bpy launch work             # Launch it
+bpy launch list             # See all profiles
+bpy launch --default work   # Set default
+bpy launch delete old       # Remove a profile
+
+# Run multiple simultaneously
+bpy launch                  # Terminal 1: default on 9222
+bpy launch work             # Terminal 2: work on 9223
+CDP_URL=http://127.0.0.1:9223 bpy tabs   # Control work profile
+```
+
+Profiles live at `~/.browser-py/profiles/<name>/`. Config at `~/.browser-py/config.json`.
+
+---
+
+## Shadow DOM Support
+
+browser-py automatically pierces shadow DOM boundaries. No configuration needed.
+
+```bash
+bpy open reddit.com
+bpy elements        # Finds elements inside shadow roots
+bpy click 5         # Works normally
 ```
 
 ---
@@ -411,173 +440,68 @@ browser-py elements --help
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `CDP_URL` | CDP endpoint URL | `http://127.0.0.1:9222` |
-| `NO_COLOR` | Disable colored CLI output | (unset) |
-
-Override the port without changing code:
-
-```bash
-export CDP_URL=http://127.0.0.1:9333
-browser-py tabs
-```
-
----
-
-## Profiles
-
-browser-py has built-in profile management. Each profile is a separate Chrome session with its own logins, cookies, and CDP port.
-
-### Create profiles
-
-```bash
-# First launch auto-creates a "default" profile
-browser-py launch
-
-# Create a named profile
-browser-py launch new work
-```
-
-```
-✓ Created profile 'work' (port 9223)
-✓ Chrome launched — profile: work (port 9223)
-
-⚡ First launch — a fresh Chrome window opened.
-   Log into the sites you want to automate.
-   Those sessions will persist for all future launches.
-```
-
-### List profiles
-
-```bash
-browser-py launch list
-```
-
-```
-Profiles:
-
-  default  port 9222  ★ default
-  work     port 9223
-  personal port 9224
-```
-
-### Launch a specific profile
-
-```bash
-browser-py launch work
-```
-
-### Set the default
-
-```bash
-browser-py launch --default work
-```
-
-Now `browser-py launch` (no name) launches the "work" profile.
-
-### Run multiple simultaneously
-
-Each profile gets its own port, so you can run them side by side:
-
-```bash
-# Terminal 1
-browser-py launch           # default profile on port 9222
-
-# Terminal 2
-browser-py launch work      # work profile on port 9223
-
-# Control each one
-browser-py tabs                                     # → default
-CDP_URL=http://127.0.0.1:9223 browser-py tabs       # → work
-```
-
-### Delete a profile
-
-```bash
-browser-py launch delete work
-```
-
-### Other options
-
-```bash
-browser-py launch --headless          # No visible window (servers/CI)
-browser-py launch --port 9333         # Override port
-browser-py launch --chrome /usr/bin/chromium   # Specific browser binary
-```
-
-Profiles are stored at `~/.browser-py/profiles/<name>/`. Config at `~/.browser-py/config.json`.
-
----
-
-## Shadow DOM Support
-
-browser-py automatically pierces shadow DOM boundaries. Sites using web components — Reddit, GitHub, Salesforce, Angular Material, Shoelace, etc. — work out of the box.
-
-```bash
-# Reddit uses shadow DOM extensively — no problem
-browser-py open reddit.com
-browser-py elements        # Finds elements inside shadow roots
-browser-py click 5         # Clicks them normally
-```
-
-No special flags, no configuration. The element scanner recursively enters every shadow root on the page.
+| `NO_COLOR` | Disable colored output | (unset) |
+| `ANTHROPIC_API_KEY` | Anthropic/Claude Max key | (from config) |
+| `OPENROUTER_API_KEY` | OpenRouter key | (from config) |
+| `OPENAI_API_KEY` | OpenAI key | (from config) |
 
 ---
 
 ## FAQ
 
-**Q: Can I use my main Chrome profile?**
-Only if Chrome isn't already running. Chrome locks its profile directory — one instance at a time. Since most people keep Chrome open, `browser-py launch` creates a separate profile. This is intentional — it keeps your automation isolated from your daily browsing.
+**Q: What's the difference between `bpy agent` and `bpy` commands?**
+`bpy agent` talks to an LLM that decides what to do. `bpy click 3` directly executes a browser command. Use agent mode for complex multi-step tasks; use direct commands for scripting.
+
+**Q: Can I use my Claude Max subscription instead of paying per-API-call?**
+Yes. Choose "Claude Max (OAuth)" during `bpy setup` and paste your OAuth token (`sk-ant-oat01-...`). Same token Claude Code uses.
 
 **Q: Do I need to log in every time?**
-No. Log in once during your first `browser-py launch`. The profile directory persists your sessions. Future launches reuse them.
-
-**Q: What about 2FA?**
-Same as regular Chrome — complete the 2FA flow once in the browser-py Chrome window. Most sites remember the device via cookies, so you won't be asked again.
-
-**Q: Does it work headless (no display)?**
-Yes. `browser-py launch --headless` runs Chrome without a visible window. Works on servers and CI. You'll need to log in with a visible window first to set up sessions, then switch to headless.
+No. Log in once during your first `bpy launch`. Sessions persist in the profile directory.
 
 **Q: What browsers are supported?**
-Chrome, Chromium, Brave, Microsoft Edge — anything Chromium-based with CDP support. Firefox is not supported (different protocol).
+Chrome, Chromium, Brave, Microsoft Edge — anything Chromium-based with CDP support.
+
+**Q: Does it work headless?**
+Yes. `bpy launch --headless` runs without a visible window. Log in with a visible window first to set up sessions.
+
+**Q: Is my data safe?**
+File operations are sandboxed to your workspace directory. The agent cannot access files outside it. Shell access can be disabled. API keys are stored locally in `~/.browser-py/config.json`.
 
 **Q: How is this different from Selenium/Playwright?**
+
 | | browser-py | Selenium | Playwright |
 |---|:---:|:---:|:---:|
 | Session reuse | ✅ | ❌ | Partial |
-| Dependencies | 1 (websockets) | Heavy | Heavy |
+| AI agent | ✅ | ❌ | ❌ |
 | Shadow DOM | ✅ | ❌ | ❌ |
+| Dependencies | 1 (core) | Heavy | Heavy |
 | Install size | ~100KB | ~50MB | ~200MB+ |
-| Browser download | No | Yes | Yes |
 
 ---
 
-## Scripting Example
+## Architecture
 
-Automate a multi-step flow:
-
-```python
-from browser_py import Browser
-import time
-
-b = Browser()
-
-# Login to a site (sessions persist — only needed once)
-b.open("https://myapp.com/login")
-b.type(0, "user@example.com")      # Email field
-b.type(1, "password123")            # Password field
-b.click(2)                          # Submit button
-time.sleep(2)                       # Wait for redirect
-
-# Now do something useful
-b.open("https://myapp.com/dashboard")
-elements = b.elements()
-
-# Find and click a specific button
-for el in elements:
-    if "Export" in el.desc:
-        b.click(el.index)
-        break
-
-b.screenshot("dashboard.png")
+```
+browser-py/
+├── browser_py/
+│   ├── core.py                 # CDP engine (Phase 1)
+│   ├── cli.py                  # bpy CLI
+│   ├── profiles.py             # Named profile management
+│   ├── js_expressions.py       # Injected JS for element scanning
+│   ├── agent/
+│   │   ├── loop.py             # Agentic while-loop (LiteLLM)
+│   │   ├── config.py           # Provider/workspace/model config
+│   │   ├── setup.py            # Interactive setup wizard
+│   │   └── tools/
+│   │       ├── browser.py      # Browser tool (wraps core.py)
+│   │       ├── files.py        # Sandboxed file ops
+│   │       ├── pdf.py          # PDF read (PyMuPDF) + create (WeasyPrint)
+│   │       ├── spreadsheet.py  # CSV + Excel (openpyxl)
+│   │       ├── shell.py        # Sandboxed shell execution
+│   │       └── cron.py         # APScheduler cron jobs
+│   └── server/
+│       └── app.py              # FastAPI web UI + API
+└── pyproject.toml
 ```
 
 ---

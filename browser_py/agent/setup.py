@@ -76,13 +76,16 @@ def run_setup() -> None:
     print(_cyan("Step 1: LLM Provider"))
     print()
 
-    tier1 = ["openrouter", "anthropic", "openai"]
+    tier1 = ["openrouter", "anthropic", "claude_max", "openai"]
     tier2 = ["bedrock", "azure", "vertex"]
 
     for i, key in enumerate(tier1, 1):
         info = PROVIDERS[key]
         current = " ✓" if key == agent_cfg.get("provider") else ""
-        print(f"  {i}. {info['name']}{_green(current)}")
+        note = ""
+        if key == "claude_max":
+            note = _dim(" — use your Max/Pro subscription, no API costs")
+        print(f"  {i}. {info['name']}{note}{_green(current)}")
 
     print(_dim("  --- Cloud providers (require SDK auth) ---"))
     for i, key in enumerate(tier2, len(tier1) + 1):
@@ -125,7 +128,23 @@ def run_setup() -> None:
             has_key = False
 
     if not has_key:
-        if provider_key in ("bedrock", "vertex"):
+        if provider_key == "claude_max":
+            # Try auto-detect first
+            from browser_py.agent.config import detect_claude_oauth_token
+            detected = detect_claude_oauth_token()
+            if detected:
+                print(f"  {_green('✓')} Auto-detected Claude OAuth token")
+                providers_cfg.setdefault(provider_key, {})["api_key"] = detected
+            else:
+                print(f"  {_yellow('Claude Max OAuth token needed.')}")
+                print(f"  {_dim('Get it from Claude Code: run claude and check ~/.claude or your credentials.')}")
+                print(f"  {_dim('Token format: sk-ant-oat01-...')}")
+                print()
+                key = _input(f"  OAuth token (sk-ant-oat01-...)")
+                if not key:
+                    print(_yellow("  Warning: no token provided. Set ANTHROPIC_API_KEY env var later."))
+                providers_cfg.setdefault(provider_key, {})["api_key"] = key
+        elif provider_key in ("bedrock", "vertex"):
             print(f"  {_yellow('Note:')} {info.get('note', '')}")
             print(f"  Set these env vars before running bpy agent/serve.")
             providers_cfg.setdefault(provider_key, {})["api_key"] = "env"

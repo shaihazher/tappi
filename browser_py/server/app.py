@@ -139,9 +139,49 @@ async def config() -> JSONResponse:
 @app.get("/api/jobs")
 async def list_jobs() -> JSONResponse:
     """List cron jobs."""
-    agent = _get_agent()
-    result = agent._cron.execute(action="list")
-    return JSONResponse({"jobs": result})
+    from browser_py.agent.tools.cron import _load_jobs
+    jobs = _load_jobs()
+    return JSONResponse({"jobs": jobs})
+
+
+@app.get("/api/profiles")
+async def list_browser_profiles() -> JSONResponse:
+    """List browser profiles."""
+    from browser_py.profiles import list_profiles
+    profiles = list_profiles()
+    return JSONResponse({"profiles": profiles})
+
+
+@app.post("/api/profiles")
+async def create_browser_profile(body: dict) -> JSONResponse:
+    """Create a new browser profile."""
+    from browser_py.profiles import create_profile
+    name = body.get("name", "")
+    if not name:
+        return JSONResponse({"error": "name required"}, status_code=400)
+    try:
+        profile = create_profile(name)
+        return JSONResponse({"profile": profile})
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+
+@app.post("/api/config")
+async def update_config(body: dict) -> JSONResponse:
+    """Update agent configuration."""
+    from browser_py.agent.config import load_config, save_config
+    config = load_config()
+    agent_cfg = config.get("agent", {})
+
+    # Only allow updating safe fields
+    allowed = {"model", "shell_enabled", "browser_profile"}
+    for key in allowed:
+        if key in body:
+            agent_cfg[key] = body[key]
+
+    config["agent"] = agent_cfg
+    save_config(config)
+    return JSONResponse({"ok": True})
 
 
 # ── WebSocket for live updates ──
@@ -296,15 +336,39 @@ _FALLBACK_HTML = """\
     --bg: #0d1117; --surface: #161b22; --border: #30363d;
     --text: #e6edf3; --text-dim: #8b949e; --accent: #58a6ff;
     --tool-bg: #1c2128; --user-bg: #1f3a5f; --agent-bg: #1c2128;
+    --danger: #f85149; --success: #3fb950;
   }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: var(--bg); color: var(--text); height: 100vh; display: flex;
-    flex-direction: column; }
+    background: var(--bg); color: var(--text); height: 100vh; display: flex; }
+
+  /* Sidebar */
+  #sidebar { width: 220px; border-right: 1px solid var(--border); display: flex;
+    flex-direction: column; background: var(--surface); flex-shrink: 0; }
+  #sidebar .logo { padding: 16px; font-size: 15px; font-weight: 700;
+    border-bottom: 1px solid var(--border); }
+  #sidebar nav { flex: 1; padding: 8px 0; }
+  #sidebar nav a { display: flex; align-items: center; gap: 8px; padding: 8px 16px;
+    color: var(--text-dim); text-decoration: none; font-size: 13px; cursor: pointer;
+    border-left: 3px solid transparent; }
+  #sidebar nav a:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+  #sidebar nav a.active { color: var(--accent); border-left-color: var(--accent);
+    background: rgba(88,166,255,0.08); }
+  #sidebar .version { padding: 12px 16px; font-size: 11px; color: var(--text-dim);
+    border-top: 1px solid var(--border); }
+
+  /* Main area */
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   header { padding: 12px 20px; border-bottom: 1px solid var(--border);
     display: flex; align-items: center; gap: 12px; }
-  header h1 { font-size: 16px; font-weight: 600; }
+  header h2 { font-size: 15px; font-weight: 600; }
   header .status { font-size: 12px; color: var(--text-dim); margin-left: auto; }
-  #chat { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex;
+
+  /* Pages */
+  .page { flex: 1; display: none; flex-direction: column; overflow: hidden; }
+  .page.active { display: flex; }
+
+  /* Chat page */
+  #chat-messages { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex;
     flex-direction: column; gap: 12px; }
   .msg { max-width: 85%; padding: 10px 14px; border-radius: 12px;
     font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
@@ -330,34 +394,164 @@ _FALLBACK_HTML = """\
     cursor: pointer; }
   #send:hover { opacity: 0.9; }
   #send:disabled { opacity: 0.4; cursor: default; }
-  .controls { display: flex; gap: 8px; }
-  .controls button { background: var(--surface); border: 1px solid var(--border);
-    border-radius: 6px; padding: 4px 10px; color: var(--text-dim); font-size: 12px;
-    cursor: pointer; }
-  .controls button:hover { color: var(--text); border-color: var(--text-dim); }
+
+  /* Settings / config pages */
+  .page-content { flex: 1; overflow-y: auto; padding: 24px 32px; max-width: 700px; }
+  .card { background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 20px; margin-bottom: 16px; }
+  .card h3 { font-size: 14px; margin-bottom: 12px; color: var(--text); }
+  .card p { font-size: 13px; color: var(--text-dim); margin-bottom: 8px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12px; color: var(--text-dim);
+    margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .field input, .field select { background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 12px; color: var(--text); font-size: 13px;
+    width: 100%; outline: none; }
+  .field input:focus, .field select:focus { border-color: var(--accent); }
+  .btn { background: var(--accent); border: none; border-radius: 6px;
+    padding: 8px 16px; color: #fff; font-size: 13px; cursor: pointer;
+    font-weight: 500; }
+  .btn:hover { opacity: 0.9; }
+  .btn.secondary { background: var(--surface); border: 1px solid var(--border);
+    color: var(--text-dim); }
+  .btn.secondary:hover { color: var(--text); border-color: var(--text-dim); }
+  .btn.danger { background: var(--danger); }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-size: 11px; font-weight: 600; }
+  .badge.active { background: rgba(63,185,80,0.15); color: var(--success); }
+  .badge.paused { background: rgba(248,81,73,0.15); color: var(--danger); }
+
+  /* Profile / job list */
+  .list-item { display: flex; align-items: center; gap: 12px; padding: 10px 0;
+    border-bottom: 1px solid var(--border); font-size: 13px; }
+  .list-item:last-child { border-bottom: none; }
+  .list-item .name { font-weight: 500; flex: 1; }
+  .list-item .meta { color: var(--text-dim); font-size: 12px; }
+  .empty { color: var(--text-dim); font-size: 13px; padding: 20px 0; text-align: center; }
 </style>
 </head>
 <body>
-<header>
-  <h1>🌐 browser-py</h1>
-  <div class="controls">
-    <button onclick="resetChat()">New Chat</button>
-  </div>
-  <div class="status" id="status">Ready</div>
-</header>
-<div id="chat"></div>
-<div id="input-area">
-  <textarea id="input" placeholder="What should I do?" rows="1"
-    onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
-  <button id="send" onclick="send()">Send</button>
+
+<div id="sidebar">
+  <div class="logo">🌐 browser-py</div>
+  <nav>
+    <a class="active" data-page="chat" onclick="showPage('chat')">💬 Chat</a>
+    <a data-page="profiles" onclick="showPage('profiles')">🌍 Browser Profiles</a>
+    <a data-page="jobs" onclick="showPage('jobs')">⏰ Scheduled Jobs</a>
+    <a data-page="settings" onclick="showPage('settings')">⚙️ Settings</a>
+  </nav>
+  <div class="version" id="version-info">browser-py</div>
 </div>
+
+<div id="main">
+  <!-- Chat Page -->
+  <div class="page active" id="page-chat">
+    <header>
+      <h2>Chat</h2>
+      <button class="btn secondary" onclick="resetChat()" style="margin-left:auto">New Chat</button>
+      <div class="status" id="status">Connecting...</div>
+    </header>
+    <div id="chat-messages"></div>
+    <div id="input-area">
+      <textarea id="input" placeholder="What should I do?" rows="1"
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
+      <button id="send" onclick="send()">Send</button>
+    </div>
+  </div>
+
+  <!-- Profiles Page -->
+  <div class="page" id="page-profiles">
+    <header><h2>Browser Profiles</h2></header>
+    <div class="page-content">
+      <div class="card">
+        <h3>Your Profiles</h3>
+        <p>Each profile has its own browser sessions (cookies, logins) and CDP port.</p>
+        <div id="profiles-list"><div class="empty">Loading...</div></div>
+      </div>
+      <div class="card">
+        <h3>New Profile</h3>
+        <div class="field">
+          <label>Profile Name</label>
+          <input type="text" id="new-profile-name" placeholder="e.g. work, personal, social">
+        </div>
+        <button class="btn" onclick="createProfile()">Create Profile</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Jobs Page -->
+  <div class="page" id="page-jobs">
+    <header><h2>Scheduled Jobs</h2></header>
+    <div class="page-content">
+      <div class="card">
+        <h3>Cron Jobs</h3>
+        <p>Recurring tasks the agent runs automatically.</p>
+        <div id="jobs-list"><div class="empty">Loading...</div></div>
+      </div>
+      <p style="font-size:12px;color:var(--text-dim)">
+        💡 Create jobs via chat: "Schedule a task to check my email every morning at 9 AM"
+      </p>
+    </div>
+  </div>
+
+  <!-- Settings Page -->
+  <div class="page" id="page-settings">
+    <header><h2>Settings</h2></header>
+    <div class="page-content">
+      <div class="card">
+        <h3>LLM Provider</h3>
+        <div class="field">
+          <label>Provider</label>
+          <input type="text" id="cfg-provider" disabled>
+        </div>
+        <div class="field">
+          <label>Model</label>
+          <input type="text" id="cfg-model">
+        </div>
+        <p style="font-size:11px">Change provider or API key via CLI: <code>bpy setup</code></p>
+      </div>
+      <div class="card">
+        <h3>Workspace</h3>
+        <div class="field">
+          <label>Directory</label>
+          <input type="text" id="cfg-workspace" disabled>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Permissions</h3>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="cfg-shell" style="width:auto">
+          <label for="cfg-shell" style="margin:0;text-transform:none">Allow shell commands</label>
+        </div>
+        <div class="field">
+          <label>Browser Profile</label>
+          <select id="cfg-profile"></select>
+        </div>
+      </div>
+      <button class="btn" onclick="saveSettings()">Save Settings</button>
+    </div>
+  </div>
+</div>
+
 <script>
-const chat = document.getElementById('chat');
+const chatEl = document.getElementById('chat-messages');
 const input = document.getElementById('input');
 const sendBtn = document.getElementById('send');
 const status = document.getElementById('status');
 let ws;
 
+// ── Navigation ──
+function showPage(name) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('#sidebar nav a').forEach(a => a.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.querySelector(`[data-page="${name}"]`).classList.add('active');
+  if (name === 'profiles') loadProfiles();
+  if (name === 'jobs') loadJobs();
+  if (name === 'settings') loadSettings();
+}
+
+// ── WebSocket ──
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${proto}//${location.host}/ws`);
@@ -381,7 +575,7 @@ function connect() {
       sendBtn.disabled = false;
       input.focus();
     } else if (msg.type === 'reset_ok') {
-      chat.innerHTML = '';
+      chatEl.innerHTML = '';
       addMsg('Chat cleared. How can I help?', 'agent');
     }
   };
@@ -396,19 +590,15 @@ function addMsg(text, cls) {
     nameSpan.className = 'tool-name';
     nameSpan.textContent = parts[0];
     div.appendChild(nameSpan);
-    if (parts.length > 1) {
-      div.appendChild(document.createTextNode('\\n' + parts.slice(1).join('\\n')));
-    }
-  } else {
-    div.textContent = text;
-  }
-  chat.appendChild(div);
-  chat.scrollTop = chat.scrollHeight;
+    if (parts.length > 1) div.appendChild(document.createTextNode('\\n' + parts.slice(1).join('\\n')));
+  } else { div.textContent = text; }
+  chatEl.appendChild(div);
+  chatEl.scrollTop = chatEl.scrollHeight;
 }
 
 function removeThinking() {
-  const thinking = chat.querySelector('.thinking');
-  if (thinking) thinking.remove();
+  const t = chatEl.querySelector('.thinking');
+  if (t) t.remove();
 }
 
 function send() {
@@ -417,22 +607,101 @@ function send() {
   addMsg(text, 'user');
   ws.send(JSON.stringify({ type: 'chat', message: text }));
   input.value = '';
+  input.style.height = 'auto';
   sendBtn.disabled = true;
 }
 
 function resetChat() {
-  if (ws?.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'reset' }));
-  }
+  if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'reset' }));
 }
 
-// Auto-resize textarea
 input.addEventListener('input', function() {
   this.style.height = 'auto';
   this.style.height = Math.min(this.scrollHeight, 120) + 'px';
 });
 
+// ── Profiles ──
+async function loadProfiles() {
+  const res = await fetch('/api/profiles');
+  const data = await res.json();
+  const el = document.getElementById('profiles-list');
+  if (!data.profiles?.length) { el.innerHTML = '<div class="empty">No profiles yet</div>'; return; }
+  el.innerHTML = data.profiles.map(p => `
+    <div class="list-item">
+      <span class="name">${p.name}</span>
+      <span class="meta">port ${p.port}</span>
+      ${p.is_default ? '<span class="badge active">default</span>' : ''}
+    </div>
+  `).join('');
+}
+
+async function createProfile() {
+  const name = document.getElementById('new-profile-name').value.trim();
+  if (!name) return;
+  const res = await fetch('/api/profiles', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ name })
+  });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  document.getElementById('new-profile-name').value = '';
+  loadProfiles();
+  loadSettings(); // refresh profile dropdown
+}
+
+// ── Jobs ──
+async function loadJobs() {
+  const res = await fetch('/api/jobs');
+  const data = await res.json();
+  const el = document.getElementById('jobs-list');
+  const jobs = Object.values(data.jobs || {});
+  if (!jobs.length) { el.innerHTML = '<div class="empty">No scheduled jobs</div>'; return; }
+  el.innerHTML = jobs.map(j => {
+    const sched = j.cron || (j.interval_minutes ? `every ${j.interval_minutes}m` : j.run_at || '?');
+    const badge = j.paused ? '<span class="badge paused">paused</span>' : '<span class="badge active">active</span>';
+    return `<div class="list-item">
+      <span class="name">${j.name}</span>
+      <span class="meta">${sched}</span>
+      ${badge}
+    </div>`;
+  }).join('');
+}
+
+// ── Settings ──
+async function loadSettings() {
+  const res = await fetch('/api/config');
+  const cfg = await res.json();
+  document.getElementById('cfg-provider').value = cfg.provider || '';
+  document.getElementById('cfg-model').value = cfg.model || '';
+  document.getElementById('cfg-workspace').value = cfg.workspace || '';
+  document.getElementById('cfg-shell').checked = cfg.shell_enabled !== false;
+  document.getElementById('version-info').textContent = `${cfg.provider} · ${cfg.model?.split('/').pop() || ''}`;
+
+  // Load profiles for dropdown
+  const pres = await fetch('/api/profiles');
+  const pdata = await pres.json();
+  const sel = document.getElementById('cfg-profile');
+  sel.innerHTML = (pdata.profiles || []).map(p =>
+    `<option value="${p.name}" ${p.name === cfg.browser_profile ? 'selected' : ''}>${p.name} (port ${p.port})</option>`
+  ).join('');
+}
+
+async function saveSettings() {
+  const body = {
+    model: document.getElementById('cfg-model').value,
+    shell_enabled: document.getElementById('cfg-shell').checked,
+    browser_profile: document.getElementById('cfg-profile').value,
+  };
+  await fetch('/api/config', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  });
+  loadSettings();
+  alert('Settings saved. Restart the server for provider/model changes to take effect.');
+}
+
 connect();
+loadSettings();
 </script>
 </body>
 </html>

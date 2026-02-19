@@ -146,7 +146,7 @@ class Agent:
 
         if provider == "openrouter":
             os.environ["OPENROUTER_API_KEY"] = key
-        elif provider == "anthropic":
+        elif provider in ("anthropic", "claude_max"):
             os.environ["ANTHROPIC_API_KEY"] = key
         elif provider == "openai":
             os.environ["OPENAI_API_KEY"] = key

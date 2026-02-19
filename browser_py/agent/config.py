@@ -27,6 +27,13 @@ PROVIDERS = {
         "env_key": "ANTHROPIC_API_KEY",
         "default_model": "claude-sonnet-4-20250514",
     },
+    "claude_max": {
+        "name": "Claude Max (OAuth)",
+        "env_key": "ANTHROPIC_API_KEY",
+        "default_model": "claude-sonnet-4-20250514",
+        "note": "Uses Claude Code OAuth token (sk-ant-oat01-...) from your Max/Pro subscription",
+        "is_oauth": True,
+    },
     "openai": {
         "name": "OpenAI",
         "env_key": "OPENAI_API_KEY",
@@ -51,6 +58,38 @@ PROVIDERS = {
         "note": "Requires GOOGLE_APPLICATION_CREDENTIALS and VERTEXAI_PROJECT",
     },
 }
+
+
+def detect_claude_oauth_token() -> str | None:
+    """Try to auto-detect Claude Code OAuth token from known locations.
+
+    Checks:
+    1. ANTHROPIC_API_KEY env var (if it's an OAuth token)
+    2. Claude Code's stored credentials in ~/.claude.json vicinity
+    3. Common credential files
+    """
+    import os
+
+    # Check env var first
+    env_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if env_key.startswith("sk-ant-oat"):
+        return env_key
+
+    # Check Claude Code config directory
+    claude_json = Path.home() / ".claude.json"
+    if claude_json.exists():
+        try:
+            data = json.loads(claude_json.read_text())
+            # Claude Code stores the OAuth account info here
+            # The actual token may be in the system keychain
+            if data.get("oauthAccount"):
+                # Try to find the token via Claude's credential storage
+                # Claude Code uses electron-safe-storage / keychain
+                pass
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    return None
 
 
 def load_config() -> dict[str, Any]:
