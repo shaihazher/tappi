@@ -1545,7 +1545,7 @@ _FALLBACK_HTML = """\
     <header>
       <h2>Chat</h2>
       <select id="profile-switcher" onchange="switchProfile()" title="Active browser profile" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text);font-size:12px;margin-left:auto;cursor:pointer"></select>
-      <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);cursor:pointer;white-space:nowrap" title="When ON, complex tasks are broken into subtasks. When OFF, everything runs in a single loop.">
+      <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);cursor:pointer;white-space:nowrap" title="Deep Mode: breaks complex tasks into focused subtasks for thorough results">
         <input type="checkbox" id="decompose-toggle" checked onchange="toggleDecompose()" style="width:auto;margin:0">
         Decompose
       </label>
@@ -1670,8 +1670,8 @@ _FALLBACK_HTML = """\
         </div>
         <div class="field" style="display:flex;align-items:center;gap:8px">
           <input type="checkbox" id="cfg-decompose" style="width:auto" checked>
-          <label for="cfg-decompose" style="margin:0;text-transform:none">Enable task decomposition</label>
-          <span style="font-size:11px;color:var(--text-dim)">(breaks complex tasks into subtasks)</span>
+          <label for="cfg-decompose" style="margin:0;text-transform:none">Deep Mode</label>
+          <span style="font-size:11px;color:var(--text-dim)">(breaks complex tasks into focused subtasks)</span>
         </div>
         <div class="field">
           <label>Browser Profile</label>
