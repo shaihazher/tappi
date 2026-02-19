@@ -28,6 +28,7 @@ _agent_lock = threading.Lock()
 _ws_clients: list[WebSocket] = []
 _chat_task: asyncio.Task | None = None  # tracks the running chat task
 _research_abort = threading.Event()  # shared abort signal for research
+_research_agents: list[Agent] = []  # active research sub-agents (for probe)
 
 
 def _on_token_update(usage: dict) -> None:
@@ -235,10 +236,20 @@ async def export_session_api(session_id: str) -> JSONResponse:
 
 @app.get("/api/probe")
 async def probe_agent() -> JSONResponse:
-    """Probe the agent's current activity state."""
+    """Probe the agent's current activity state (chat or research)."""
+    # Check research sub-agents first (most likely reason to probe)
+    for ra in list(_research_agents):
+        info = ra.probe()
+        if info.get("state") and info["state"] != "idle":
+            info["source"] = "research"
+            return JSONResponse(info)
+
+    # Fall back to global chat agent
     try:
         agent = _get_agent()
-        return JSONResponse(agent.probe())
+        info = agent.probe()
+        info["source"] = "chat"
+        return JSONResponse(info)
     except RuntimeError:
         return JSONResponse({"state": "idle"})
 
@@ -310,6 +321,12 @@ async def start_research(body: dict) -> JSONResponse:
     import threading
 
     _research_abort.clear()
+    _research_agents.clear()
+
+    def on_agent_created(agent: Agent) -> None:
+        """Track research sub-agents for probe."""
+        _research_agents.clear()  # only track the current one
+        _research_agents.append(agent)
 
     def _run() -> None:
         from browser_py.agent.research import run_research
@@ -320,6 +337,7 @@ async def start_research(body: dict) -> JSONResponse:
                 browser_profile=cfg.get("browser_profile"),
                 num_agents=num_agents,
                 abort_event=_research_abort,
+                on_agent_created=on_agent_created,
             )
             if _research_abort.is_set():
                 msg = json.dumps({"type": "research_error", "error": "Flushed by user"})
@@ -338,6 +356,8 @@ async def start_research(body: dict) -> JSONResponse:
                 "error": str(e),
             })
             _broadcast(msg)
+        finally:
+            _research_agents.clear()
 
     threading.Thread(target=_run, daemon=True).start()
     return JSONResponse({"ok": True, "message": "Research started"})

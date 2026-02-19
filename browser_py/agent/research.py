@@ -132,6 +132,7 @@ class ResearchSession:
         browser_profile: Browser profile for sub-agents.
         num_agents: Number of sub-agents (default: 5).
         abort_event: Threading event — set to abort research early.
+        on_agent_created: Callback when a sub-agent is created (for external tracking).
     """
 
     def __init__(
@@ -141,12 +142,14 @@ class ResearchSession:
         browser_profile: str | None = None,
         num_agents: int = NUM_SUB_AGENTS,
         abort_event: Any = None,
+        on_agent_created: Callable | None = None,
     ) -> None:
         self.query = query
         self.on_progress = on_progress or (lambda s, m: None)
         self.browser_profile = browser_profile
         self.num_agents = num_agents
         self.abort_event = abort_event
+        self.on_agent_created = on_agent_created
         self.workspace = get_workspace()
         self.research_dir = self.workspace / "research" / f"research_{int(time.time())}"
         self.research_dir.mkdir(parents=True, exist_ok=True)
@@ -166,6 +169,8 @@ class ResearchSession:
             agent._shell.enabled = False
         if system_prompt:
             agent._custom_system_prompt = system_prompt
+        if self.on_agent_created:
+            self.on_agent_created(agent)
         return agent
 
     def plan(self) -> list[dict[str, str]]:
@@ -418,6 +423,7 @@ def run_research(
     browser_profile: str | None = None,
     num_agents: int = NUM_SUB_AGENTS,
     abort_event: Any = None,
+    on_agent_created: Callable | None = None,
 ) -> dict[str, Any]:
     """Convenience function to run a full research session.
 
@@ -427,6 +433,7 @@ def run_research(
         browser_profile: Browser profile for sub-agents.
         num_agents: Number of sub-agents (default: 5).
         abort_event: Threading event to abort research early.
+        on_agent_created: Callback when a sub-agent is created.
 
     Returns:
         Result dict with report_path, report content, and metadata.
@@ -437,5 +444,6 @@ def run_research(
         browser_profile=browser_profile,
         num_agents=num_agents,
         abort_event=abort_event,
+        on_agent_created=on_agent_created,
     )
     return session.run()
