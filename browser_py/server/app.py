@@ -30,6 +30,13 @@ _chat_task: asyncio.Task | None = None  # tracks the running chat task
 _research_abort = threading.Event()  # shared abort signal for research
 _research_agents: list[Agent] = []  # active research sub-agents (for probe)
 
+# ── Cron run tracking ──
+# Active and recent cron runs, keyed by run_id
+# Each entry: {job_id, job_name, task, run_id, status, started, ended, events[], result, agent}
+_cron_runs: dict[str, dict] = {}
+_cron_runs_lock = threading.Lock()
+_MAX_CRON_HISTORY = 50  # keep last N completed runs
+
 
 def _on_token_update(usage: dict) -> None:
     """Broadcast token usage updates to WebSocket clients."""
@@ -412,6 +419,92 @@ async def list_jobs() -> JSONResponse:
     return JSONResponse({"jobs": jobs})
 
 
+@app.get("/api/jobs/runs")
+async def list_job_runs(job_id: str | None = None, limit: int = 20) -> JSONResponse:
+    """List recent cron job runs (active + completed)."""
+    with _cron_runs_lock:
+        runs = list(_cron_runs.values())
+    if job_id:
+        runs = [r for r in runs if r.get("job_id") == job_id]
+    # Sort newest first
+    runs.sort(key=lambda r: r.get("started", 0), reverse=True)
+    runs = runs[:limit]
+    # Strip agent reference (not serializable) and cap events
+    safe_runs = []
+    for r in runs:
+        safe = {k: v for k, v in r.items() if k != "agent"}
+        safe["events"] = safe.get("events", [])[-50:]  # last 50 events
+        if safe.get("result"):
+            safe["result"] = safe["result"][:5000]
+        safe_runs.append(safe)
+    return JSONResponse({"runs": safe_runs})
+
+
+@app.get("/api/jobs/runs/{run_id}")
+async def get_job_run(run_id: str) -> JSONResponse:
+    """Get details of a specific cron run including events."""
+    with _cron_runs_lock:
+        run = _cron_runs.get(run_id)
+    if not run:
+        return JSONResponse({"error": "Run not found"}, status_code=404)
+    safe = {k: v for k, v in run.items() if k != "agent"}
+    return JSONResponse(safe)
+
+
+@app.get("/api/jobs/runs/{run_id}/probe")
+async def probe_job_run(run_id: str) -> JSONResponse:
+    """Probe a running cron job's agent."""
+    with _cron_runs_lock:
+        run = _cron_runs.get(run_id)
+    if not run:
+        return JSONResponse({"error": "Run not found"}, status_code=404)
+    agent = run.get("agent")
+    if not agent:
+        return JSONResponse({"state": run.get("status", "done")})
+    info = agent.probe()
+    info["run_id"] = run_id
+    return JSONResponse(info)
+
+
+@app.post("/api/jobs/trigger")
+async def trigger_job(body: dict) -> JSONResponse:
+    """Trigger a job to run immediately. Returns the run_id for live tracking."""
+    from browser_py.agent.tools.cron import _load_jobs
+    job_id = body.get("job_id", "")
+    if not job_id:
+        return JSONResponse({"error": "job_id required"}, status_code=400)
+    jobs = _load_jobs()
+    job = jobs.get(job_id)
+    if not job:
+        return JSONResponse({"error": "Job not found"}, status_code=404)
+
+    import uuid as _uuid
+    run_id = f"{job_id}_{int(time.time())}_{_uuid.uuid4().hex[:4]}"
+    task_text = job.get("task", "")
+    job_name = job.get("name", task_text[:50])
+
+    # Start in background thread
+    t = threading.Thread(
+        target=_run_scheduled_task,
+        args=[task_text, job_id, job_name],
+        daemon=True,
+    )
+    t.start()
+
+    # Wait briefly for the run record to appear
+    await asyncio.sleep(0.3)
+
+    # Find the run_id (it was created inside _run_scheduled_task)
+    with _cron_runs_lock:
+        # Find the most recent run for this job_id
+        matching = [r for r in _cron_runs.values()
+                    if r.get("job_id") == job_id and r.get("status") == "running"]
+        matching.sort(key=lambda r: r.get("started", 0), reverse=True)
+    if matching:
+        return JSONResponse({"ok": True, "run_id": matching[0]["run_id"]})
+    return JSONResponse({"ok": True, "run_id": None})
+
+
 @app.get("/api/profiles")
 async def list_browser_profiles() -> JSONResponse:
     """List browser profiles."""
@@ -776,6 +869,7 @@ def _add_job_to_scheduler(job: dict) -> None:
 
     jid = job.get("id", "")
     task_text = job.get("task", "")
+    job_name = job.get("name", task_text[:50])
 
     # Remove existing job if it exists (for updates)
     try:
@@ -798,21 +892,22 @@ def _add_job_to_scheduler(job: dict) -> None:
                 timezone=job.get("timezone") or None,
             )
             _scheduler.add_job(
-                _run_scheduled_task, trigger, args=[task_text], id=jid
+                _run_scheduled_task, trigger,
+                args=[task_text, jid, job_name], id=jid,
             )
     elif job.get("schedule_type") == "interval":
         minutes = job.get("interval_minutes", 60)
         _scheduler.add_job(
             _run_scheduled_task,
             IntervalTrigger(minutes=minutes),
-            args=[task_text],
+            args=[task_text, jid, job_name],
             id=jid,
         )
     elif job.get("schedule_type") == "date":
         _scheduler.add_job(
             _run_scheduled_task,
             DateTrigger(run_date=job["run_at"]),
-            args=[task_text],
+            args=[task_text, jid, job_name],
             id=jid,
         )
 
@@ -840,12 +935,15 @@ def _on_job_change(action: str, job: dict) -> None:
         except Exception:
             pass
     elif action == "run_now":
-        # Execute immediately in a thread
+        # Execute immediately in a thread with full streaming
         task_text = job.get("task", "")
+        job_name = job.get("name", task_text[:50])
         if task_text:
             import threading
             threading.Thread(
-                target=_run_scheduled_task, args=[task_text], daemon=True
+                target=_run_scheduled_task,
+                args=[task_text, jid, job_name],
+                daemon=True,
             ).start()
     elif action == "add":
         _add_job_to_scheduler(job)
@@ -872,29 +970,108 @@ def _start_scheduler() -> None:
     _scheduler.start()
 
 
-def _run_scheduled_task(task: str) -> None:
-    """Execute a scheduled task in a fresh agent context."""
+def _run_scheduled_task(task: str, job_id: str = "", job_name: str = "") -> None:
+    """Execute a scheduled task in a fresh agent context with full streaming."""
+    import uuid as _uuid
+
+    run_id = f"{job_id or 'manual'}_{int(time.time())}_{_uuid.uuid4().hex[:4]}"
     cfg = get_agent_config()
+
+    run_record: dict[str, Any] = {
+        "job_id": job_id,
+        "job_name": job_name or task[:50],
+        "task": task,
+        "run_id": run_id,
+        "status": "running",
+        "started": time.time(),
+        "ended": None,
+        "events": [],  # capped event log for history
+        "result": None,
+        "agent": None,
+    }
+
+    with _cron_runs_lock:
+        _cron_runs[run_id] = run_record
+        # Prune old completed runs
+        completed = [rid for rid, r in _cron_runs.items()
+                     if r["status"] in ("done", "error") and rid != run_id]
+        for old_rid in completed[:-_MAX_CRON_HISTORY]:
+            del _cron_runs[old_rid]
+
+    # Broadcast that a cron run started
+    _broadcast(json.dumps({
+        "type": "cron_run_start",
+        "run_id": run_id,
+        "job_id": job_id,
+        "job_name": run_record["job_name"],
+        "task": task,
+    }))
+
+    def _cron_tool_call(name: str, params: dict, result: str) -> None:
+        event = {"type": "tool_call", "tool": name, "params": params, "result": result[:2000]}
+        run_record["events"].append(event)
+        # Cap events list
+        if len(run_record["events"]) > 200:
+            run_record["events"] = run_record["events"][-200:]
+        _broadcast(json.dumps({**event, "source": "cron", "run_id": run_id}))
+
+    def _cron_subtask_progress(data: dict) -> None:
+        run_record["events"].append(data)
+        if len(run_record["events"]) > 200:
+            run_record["events"] = run_record["events"][-200:]
+        _broadcast(json.dumps({**data, "source": "cron", "run_id": run_id}))
+
+    def _cron_token_update(usage: dict) -> None:
+        _broadcast(json.dumps({
+            "type": "token_update", "source": "cron", "run_id": run_id, **usage,
+        }))
+
     agent = Agent(
         browser_profile=cfg.get("browser_profile"),
+        on_tool_call=_cron_tool_call,
+        on_subtask_progress=_cron_subtask_progress,
+        on_token_update=_cron_token_update,
     )
     if not cfg.get("shell_enabled", True):
         agent._shell.enabled = False
+    run_record["agent"] = agent
 
     try:
         result = agent.chat(task)
-        # Log result
+        run_record["status"] = "done"
+        run_record["result"] = result
+
+        # Log to disk
         log_dir = get_workspace() / ".cron_logs"
         log_dir.mkdir(exist_ok=True)
-        log_file = log_dir / f"{int(time.time())}.log"
+        log_file = log_dir / f"{run_id}.log"
         log_file.write_text(f"Task: {task}\n\nResult:\n{result}\n")
+
+        _broadcast(json.dumps({
+            "type": "cron_run_done",
+            "run_id": run_id,
+            "job_id": job_id,
+            "job_name": run_record["job_name"],
+            "result": result[:5000],
+        }))
     except Exception as e:
+        run_record["status"] = "error"
+        run_record["result"] = str(e)
+
         log_dir = get_workspace() / ".cron_logs"
         log_dir.mkdir(exist_ok=True)
-        log_file = log_dir / f"{int(time.time())}_error.log"
+        log_file = log_dir / f"{run_id}_error.log"
         log_file.write_text(f"Task: {task}\n\nError:\n{e}\n")
+
+        _broadcast(json.dumps({
+            "type": "cron_run_error",
+            "run_id": run_id,
+            "job_id": job_id,
+            "error": str(e),
+        }))
     finally:
-        # Clean up browser tabs opened by this task
+        run_record["ended"] = time.time()
+        run_record["agent"] = None  # release agent reference
         try:
             agent.cleanup_browser()
         except Exception:
@@ -1157,25 +1334,70 @@ _FALLBACK_HTML = """\
   .subtask-plan { padding: 4px 0; }
   .subtask-list { margin: 8px 0; }
   .subtask-item {
-    padding: 4px 8px; margin: 2px 0; border-radius: 4px;
+    padding: 8px 10px; margin: 4px 0; border-radius: 6px;
     font-size: 13px; color: var(--text-dim);
     background: rgba(255,255,255,0.03);
+    border-left: 3px solid transparent;
+    transition: all 0.2s;
   }
   .subtask-item.active {
-    color: var(--text); background: rgba(99,102,241,0.1);
-    border-left: 2px solid var(--accent);
+    color: var(--text); background: rgba(99,102,241,0.08);
+    border-left-color: var(--accent);
   }
-  .subtask-item.done { color: var(--text-dim); }
+  .subtask-item.done { color: var(--text-dim); border-left-color: var(--success); }
   .subtask-item small { color: var(--text-dim); font-size: 11px; }
+  .subtask-item .subtask-header { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .subtask-item .subtask-header .chevron { font-size: 10px; transition: transform 0.2s; }
+  .subtask-item .subtask-header .chevron.open { transform: rotate(90deg); }
   .subtask-stream {
-    margin-top: 8px; padding: 8px 10px;
-    background: rgba(0,0,0,0.2); border-radius: 6px;
-    font-size: 13px; line-height: 1.5;
-    max-height: 300px; overflow-y: auto;
-    white-space: pre-wrap; word-break: break-word;
-    display: none; /* shown when content arrives */
+    margin-top: 8px; padding: 10px 12px;
+    background: rgba(0,0,0,0.25); border-radius: 6px;
+    font-size: 13px; line-height: 1.6;
+    max-height: 400px; overflow-y: auto;
+    word-break: break-word;
+    display: none;
   }
-  .subtask-stream:not(:empty) { display: block; }
+  .subtask-stream.visible { display: block; }
+  .subtask-stream.streaming { border-left: 2px solid var(--accent); }
+  /* Markdown inside streams + agent messages */
+  .subtask-stream h1, .subtask-stream h2, .subtask-stream h3,
+  .md-content h1, .md-content h2, .md-content h3 {
+    margin: 12px 0 6px; font-size: 15px; color: var(--text);
+  }
+  .subtask-stream h1, .md-content h1 { font-size: 17px; }
+  .subtask-stream h2, .md-content h2 { font-size: 15px; }
+  .subtask-stream h3, .md-content h3 { font-size: 14px; }
+  .subtask-stream p, .md-content p { margin: 4px 0; }
+  .subtask-stream ul, .subtask-stream ol, .md-content ul, .md-content ol {
+    margin: 4px 0 4px 20px;
+  }
+  .subtask-stream code, .md-content code {
+    background: rgba(255,255,255,0.08); padding: 1px 4px; border-radius: 3px;
+    font-size: 12px;
+  }
+  .subtask-stream pre, .md-content pre {
+    background: rgba(0,0,0,0.3); padding: 8px; border-radius: 4px;
+    overflow-x: auto; margin: 6px 0;
+  }
+  .subtask-stream pre code, .md-content pre code {
+    background: none; padding: 0;
+  }
+  .subtask-stream a, .md-content a { color: var(--accent); }
+  .subtask-stream blockquote, .md-content blockquote {
+    border-left: 3px solid var(--border); padding-left: 10px; margin: 6px 0;
+    color: var(--text-dim);
+  }
+
+  /* Cron run items */
+  .run-item { display: flex; align-items: center; gap: 12px; padding: 10px 0;
+    border-bottom: 1px solid var(--border); font-size: 13px; cursor: pointer; }
+  .run-item:last-child { border-bottom: none; }
+  .run-item:hover { background: rgba(255,255,255,0.03); margin: 0 -12px; padding: 10px 12px; border-radius: 6px; }
+  .run-item .run-name { font-weight: 500; flex: 1; }
+  .run-item .run-meta { color: var(--text-dim); font-size: 12px; }
+  .run-item .run-status { font-size: 11px; }
+  .pulse { animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
 </style>
 </head>
 <body>
@@ -1399,17 +1621,45 @@ _FALLBACK_HTML = """\
 
   <!-- Jobs Page -->
   <div class="page" id="page-jobs">
-    <header><h2>Scheduled Jobs</h2></header>
+    <header>
+      <h2>Scheduled Jobs</h2>
+      <div class="status" id="jobs-status"></div>
+    </header>
     <div class="page-content">
+      <!-- Active Runs -->
+      <div class="card" id="active-runs-card" style="display:none">
+        <h3>🔴 Running Now</h3>
+        <div id="active-runs-list"></div>
+      </div>
+
+      <!-- Job Definitions -->
       <div class="card">
         <h3>Cron Jobs</h3>
         <p>Recurring tasks the agent runs automatically.</p>
         <div id="jobs-list"><div class="empty">Loading...</div></div>
       </div>
+
+      <!-- Recent Runs -->
+      <div class="card">
+        <h3>Recent Runs</h3>
+        <div id="runs-list"><div class="empty">Loading...</div></div>
+      </div>
+
       <p style="font-size:12px;color:var(--text-dim)">
         💡 Create jobs via chat: "Schedule a task to check my email every morning at 9 AM"
       </p>
     </div>
+  </div>
+
+  <!-- Cron Run Viewer (overlay page) -->
+  <div class="page" id="page-cron-run">
+    <header>
+      <h2 id="cron-run-title">Job Run</h2>
+      <button class="btn secondary" onclick="probeCronRun()" style="margin-left:auto;font-size:12px;padding:6px 10px">🔍 Probe</button>
+      <button class="btn secondary" onclick="showPage('jobs')" style="font-size:12px;padding:6px 10px">← Back</button>
+      <div class="status" id="cron-run-status"></div>
+    </header>
+    <div id="cron-run-messages" style="flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px"></div>
   </div>
 
   <!-- Settings Page -->
@@ -1496,7 +1746,20 @@ _FALLBACK_HTML = """\
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
 <script>
+// Markdown renderer setup
+const md = (typeof marked !== 'undefined') ? marked : null;
+if (md && md.setOptions) {
+  md.setOptions({ breaks: true, gfm: true });
+}
+function renderMd(text) {
+  if (!text) return '';
+  if (md && md.parse) return md.parse(text);
+  // Fallback: escape HTML and preserve newlines
+  return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
 const chatEl = document.getElementById('chat-messages');
 const inputEl = document.getElementById('input');
 const sendBtn = document.getElementById('send');
@@ -1979,6 +2242,7 @@ function showPage(name) {
   if (name === 'settings') loadSettingsPage();
   if (name === 'setup') initSetupPage();
   if (name === 'chat') loadSessions();
+  // cron-run page is opened via openCronRun(), not showPage
 }
 
 // ── Setup Page ──
@@ -2188,16 +2452,51 @@ function connect() {
   ws.onclose = () => { statusEl.textContent = 'Disconnected'; setTimeout(connect, 2000); };
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
+
+    // ── Cron run events ──
+    // Events from cron jobs have source="cron" and run_id
+    if (msg.source === 'cron' && msg.run_id) {
+      // Route to cron run viewer if it's open and viewing this run
+      if (window._viewingCronRun === msg.run_id) {
+        replayCronEvent(msg);
+      }
+      return;
+    }
+    if (msg.type === 'cron_run_start') {
+      // A cron job started — refresh jobs page if visible
+      if (document.getElementById('page-jobs').classList.contains('active')) loadJobRuns();
+      return;
+    }
+    if (msg.type === 'cron_run_done' || msg.type === 'cron_run_error') {
+      // A cron job finished
+      if (document.getElementById('page-jobs').classList.contains('active')) loadJobRuns();
+      if (window._viewingCronRun === msg.run_id) {
+        const statusEl = document.getElementById('cron-run-status');
+        if (msg.type === 'cron_run_done') {
+          statusEl.textContent = '✅ Done';
+          if (msg.result) addCronMsg(msg.result, 'agent');
+        } else {
+          statusEl.textContent = '❌ Error';
+          addCronMsg('Error: ' + (msg.error || 'Unknown'), 'tool');
+        }
+      }
+      return;
+    }
+
     if (msg.type === 'thinking') {
       removeThinking();
       addMsg('Thinking...', 'agent thinking');
     } else if (msg.type === 'tool_call') {
       removeThinking();
-      const action = msg.params?.action || '';
-      const detail = action ? ` \\u2192 ${action}` : '';
-      let text = `\\ud83d\\udd27 ${msg.tool}${detail}`;
-      if (msg.result) text += '\\n' + msg.result.slice(0, 500);
-      addMsg(text, 'tool');
+      // During subtask execution, suppress tool calls from main chat
+      // (the step's stream shows the output directly)
+      if (!document.querySelector('.subtask-item.active')) {
+        const action = msg.params?.action || '';
+        const detail = action ? ` \\u2192 ${action}` : '';
+        let text = `\\ud83d\\udd27 ${msg.tool}${detail}`;
+        if (msg.result) text += '\\n' + msg.result.slice(0, 500);
+        addMsg(text, 'tool');
+      }
     } else if (msg.type === 'response') {
       removeThinking();
       addMsg(msg.content, 'agent');
@@ -2248,33 +2547,92 @@ function connect() {
       btn.disabled = false;
       btn.textContent = 'Start Research';
     } else if (msg.type === 'plan') {
-      // Subtask decomposition plan
+      // Subtask decomposition plan — each step gets its own stream area
       removeThinking();
       let html = '<div class="subtask-plan"><strong>📋 Task decomposed into ' + msg.subtasks.length + ' steps:</strong><div class="subtask-list">';
       msg.subtasks.forEach((s, i) => {
-        html += '<div class="subtask-item" id="subtask-' + i + '"><span class="subtask-status">⏳</span> <strong>Step ' + (i+1) + '</strong> (' + s.tool + '): ' + s.task.slice(0, 80) + '</div>';
+        html += '<div class="subtask-item" id="subtask-' + i + '">' +
+          '<div class="subtask-header" onclick="toggleSubtaskStream(' + i + ')">' +
+          '<span class="chevron" id="subtask-chevron-' + i + '">▶</span>' +
+          '<span class="subtask-status">⏳</span> <strong>Step ' + (i+1) + '</strong> (' + s.tool + '): ' + s.task.slice(0, 100) +
+          '</div>' +
+          '<div class="subtask-stream" id="subtask-stream-' + i + '"></div>' +
+          '</div>';
       });
-      html += '</div><div class="subtask-stream" id="subtask-stream"></div></div>';
+      html += '</div></div>';
       addMsg(html, 'agent', true);
+      // Track raw text per subtask for markdown rendering
+      window._subtaskText = {};
     } else if (msg.type === 'subtask_start') {
-      const el = document.getElementById('subtask-' + msg.subtask.index);
-      if (el) { el.querySelector('.subtask-status').textContent = '▶️'; el.classList.add('active'); }
-      // Clear stream area for new subtask
-      const stream = document.getElementById('subtask-stream');
-      if (stream) stream.textContent = '';
+      const idx = msg.subtask.index;
+      const el = document.getElementById('subtask-' + idx);
+      if (el) {
+        el.querySelector('.subtask-status').textContent = '▶️';
+        el.classList.add('active');
+        // Auto-expand this step's stream and collapse others
+        document.querySelectorAll('.subtask-stream.visible').forEach(s => {
+          if (s.id !== 'subtask-stream-' + idx) {
+            s.classList.remove('visible', 'streaming');
+            const chevId = s.id.replace('stream-', 'chevron-');
+            const chev = document.getElementById(chevId);
+            if (chev) chev.classList.remove('open');
+          }
+        });
+        const stream = document.getElementById('subtask-stream-' + idx);
+        if (stream) {
+          stream.classList.add('visible', 'streaming');
+          stream.innerHTML = '<span style="color:var(--text-dim);font-style:italic">Working...</span>';
+          const chev = document.getElementById('subtask-chevron-' + idx);
+          if (chev) chev.classList.add('open');
+        }
+        // Clear raw text buffer
+        window._subtaskText = window._subtaskText || {};
+        window._subtaskText[idx] = '';
+        // Scroll this step into view
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
     } else if (msg.type === 'subtask_done') {
-      const el = document.getElementById('subtask-' + msg.subtask.index);
+      const idx = msg.subtask.index;
+      const el = document.getElementById('subtask-' + idx);
       if (el) {
         el.querySelector('.subtask-status').textContent = '✅';
         el.classList.remove('active');
         el.classList.add('done');
-        el.innerHTML += ' <small>(' + msg.subtask.duration + 's)</small>';
+        // Add duration to header
+        const header = el.querySelector('.subtask-header strong');
+        if (header && !header.querySelector('small')) {
+          header.insertAdjacentHTML('afterend', ' <small>(' + msg.subtask.duration + 's)</small>');
+        }
+        // Final markdown render of completed step
+        const stream = document.getElementById('subtask-stream-' + idx);
+        if (stream && window._subtaskText && window._subtaskText[idx]) {
+          stream.innerHTML = renderMd(window._subtaskText[idx]);
+          stream.classList.remove('streaming');
+        }
       }
     } else if (msg.type === 'stream_chunk') {
-      const stream = document.getElementById('subtask-stream');
+      const idx = msg.index != null ? msg.index : (window._activeSubtaskIdx || 0);
+      const stream = document.getElementById('subtask-stream-' + idx);
       if (stream) {
-        stream.textContent += msg.chunk;
+        // Accumulate raw text
+        window._subtaskText = window._subtaskText || {};
+        window._subtaskText[idx] = (window._subtaskText[idx] || '') + msg.chunk;
+        // Render as markdown (live)
+        stream.innerHTML = renderMd(window._subtaskText[idx]);
+        stream.classList.add('visible', 'streaming');
+        // Auto-scroll within the stream div
         stream.scrollTop = stream.scrollHeight;
+        // Keep the step in view
+        const item = document.getElementById('subtask-' + idx);
+        if (item) {
+          const rect = item.getBoundingClientRect();
+          if (rect.bottom > window.innerHeight || rect.top < 0) {
+            stream.scrollIntoView({ behavior: 'smooth', block: 'end' });
+          }
+        }
+        // Ensure chevron is open
+        const chev = document.getElementById('subtask-chevron-' + idx);
+        if (chev) chev.classList.add('open');
       }
     }
   };
@@ -2292,9 +2650,29 @@ function addMsg(text, cls, raw) {
     nameSpan.textContent = parts[0];
     div.appendChild(nameSpan);
     if (parts.length > 1) div.appendChild(document.createTextNode('\\n' + parts.slice(1).join('\\n')));
+  } else if (cls === 'agent') {
+    // Render agent messages as markdown
+    div.innerHTML = '<div class="md-content">' + renderMd(text) + '</div>';
   } else { div.textContent = text; }
   chatEl.appendChild(div);
   chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+function toggleSubtaskStream(idx) {
+  // idx can be a number or "cron-N" string
+  const prefix = typeof idx === 'string' && idx.startsWith('cron-') ? 'cron-subtask' : 'subtask';
+  const numIdx = typeof idx === 'string' ? idx.replace('cron-', '') : idx;
+  const stream = document.getElementById(prefix + '-stream-' + numIdx);
+  const chev = document.getElementById(prefix + '-chevron-' + numIdx);
+  if (!stream) return;
+  const isVisible = stream.classList.contains('visible');
+  if (isVisible) {
+    stream.classList.remove('visible');
+    if (chev) chev.classList.remove('open');
+  } else {
+    stream.classList.add('visible');
+    if (chev) chev.classList.add('open');
+  }
 }
 
 function removeThinking() {
@@ -2420,7 +2798,12 @@ async function createProfile() {
 }
 
 // ── Jobs ──
+// Track the currently viewed cron run (for live streaming)
+window._viewingCronRun = null;
+window._cronRunText = {};  // per-subtask raw text for viewed cron run
+
 async function loadJobs() {
+  // Load job definitions
   const res = await fetch('/api/jobs');
   const data = await res.json();
   const el = document.getElementById('jobs-list');
@@ -2433,8 +2816,181 @@ async function loadJobs() {
       <span class="name">${j.name}</span>
       <span class="meta">${sched}</span>
       ${badge}
+      <button class="btn secondary" style="padding:4px 10px;font-size:11px" onclick="event.stopPropagation();runJobNow('${j.id}')">▶ Run</button>
     </div>`;
   }).join('');
+
+  // Load recent runs
+  await loadJobRuns();
+}
+
+async function loadJobRuns() {
+  const res = await fetch('/api/jobs/runs?limit=20');
+  const data = await res.json();
+  const runs = data.runs || [];
+
+  // Active runs card
+  const activeRuns = runs.filter(r => r.status === 'running');
+  const activeCard = document.getElementById('active-runs-card');
+  const activeList = document.getElementById('active-runs-list');
+  if (activeRuns.length) {
+    activeCard.style.display = 'block';
+    activeList.innerHTML = activeRuns.map(r => {
+      const elapsed = Math.round((Date.now()/1000 - r.started));
+      return `<div class="run-item" onclick="openCronRun('${r.run_id}')">
+        <span class="run-status pulse">🔴</span>
+        <span class="run-name">${r.job_name}</span>
+        <span class="run-meta">${elapsed}s ago</span>
+      </div>`;
+    }).join('');
+  } else {
+    activeCard.style.display = 'none';
+  }
+
+  // Recent completed runs
+  const doneRuns = runs.filter(r => r.status !== 'running');
+  const runsList = document.getElementById('runs-list');
+  if (!doneRuns.length) {
+    runsList.innerHTML = '<div class="empty">No recent runs</div>';
+  } else {
+    runsList.innerHTML = doneRuns.slice(0, 15).map(r => {
+      const icon = r.status === 'done' ? '✅' : '❌';
+      const when = new Date(r.started * 1000).toLocaleString();
+      const dur = r.ended ? Math.round(r.ended - r.started) + 's' : '—';
+      return `<div class="run-item" onclick="openCronRun('${r.run_id}')">
+        <span class="run-status">${icon}</span>
+        <span class="run-name">${r.job_name}</span>
+        <span class="run-meta">${when} · ${dur}</span>
+      </div>`;
+    }).join('');
+  }
+}
+
+async function runJobNow(jobId) {
+  // Trigger via the agent's cron tool run_now path
+  const res = await fetch('/api/jobs');
+  const data = await res.json();
+  const jobs = data.jobs || {};
+  const job = jobs[jobId];
+  if (!job) { alert('Job not found'); return; }
+
+  // Direct trigger — POST a run_now to a simple endpoint
+  // Actually, we can call _run_scheduled_task via a new endpoint
+  const rres = await fetch('/api/jobs/trigger', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ job_id: jobId }),
+  });
+  const rdata = await rres.json();
+  if (rdata.run_id) {
+    // Auto-open the run viewer
+    openCronRun(rdata.run_id);
+  }
+}
+
+async function openCronRun(runId) {
+  window._viewingCronRun = runId;
+  window._cronRunText = {};
+
+  // Switch to the cron run page
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('#sidebar nav a').forEach(a => a.classList.remove('active'));
+  document.getElementById('page-cron-run').classList.add('active');
+  document.querySelector('[data-page="jobs"]').classList.add('active');
+
+  const msgArea = document.getElementById('cron-run-messages');
+  msgArea.innerHTML = '<div class="msg agent thinking">Loading run details...</div>';
+
+  // Fetch run data
+  const res = await fetch('/api/jobs/runs/' + runId);
+  const run = await res.json();
+  if (run.error) { msgArea.innerHTML = `<div class="msg tool">${run.error}</div>`; return; }
+
+  document.getElementById('cron-run-title').textContent = `⏰ ${run.job_name}`;
+  document.getElementById('cron-run-status').textContent =
+    run.status === 'running' ? '🔴 Running' : run.status === 'done' ? '✅ Done' : '❌ Error';
+
+  msgArea.innerHTML = '';
+
+  // Show task
+  addCronMsg(`**Task:** ${run.task}`, 'user');
+
+  // Replay events
+  for (const ev of (run.events || [])) {
+    replayCronEvent(ev);
+  }
+
+  // If done, show final result
+  if (run.status !== 'running' && run.result) {
+    addCronMsg(run.result, 'agent');
+  }
+}
+
+function addCronMsg(text, cls, raw) {
+  const msgArea = document.getElementById('cron-run-messages');
+  if (!msgArea) return;
+  const div = document.createElement('div');
+  div.className = 'msg ' + cls;
+  if (raw) {
+    div.innerHTML = text;
+  } else if (cls === 'tool') {
+    div.textContent = text;
+  } else if (cls === 'agent') {
+    div.innerHTML = '<div class="md-content">' + renderMd(text) + '</div>';
+  } else {
+    div.innerHTML = '<div class="md-content">' + renderMd(text) + '</div>';
+  }
+  msgArea.appendChild(div);
+  msgArea.scrollTop = msgArea.scrollHeight;
+}
+
+function replayCronEvent(ev) {
+  if (ev.type === 'plan') {
+    let html = '<div class="subtask-plan"><strong>📋 ' + ev.subtasks.length + ' steps:</strong><div class="subtask-list">';
+    ev.subtasks.forEach((s, i) => {
+      html += '<div class="subtask-item" id="cron-subtask-' + i + '">' +
+        '<div class="subtask-header" onclick="toggleSubtaskStream(\'cron-\'+' + i + ')">' +
+        '<span class="chevron" id="cron-subtask-chevron-' + i + '">▶</span>' +
+        '<span class="subtask-status">⏳</span> <strong>Step ' + (i+1) + '</strong> (' + s.tool + '): ' + s.task.slice(0, 100) +
+        '</div>' +
+        '<div class="subtask-stream" id="cron-subtask-stream-' + i + '"></div>' +
+        '</div>';
+    });
+    html += '</div></div>';
+    addCronMsg(html, 'agent', true);
+  } else if (ev.type === 'subtask_start') {
+    const el = document.getElementById('cron-subtask-' + ev.subtask.index);
+    if (el) { el.querySelector('.subtask-status').textContent = '▶️'; el.classList.add('active'); }
+  } else if (ev.type === 'subtask_done') {
+    const el = document.getElementById('cron-subtask-' + ev.subtask.index);
+    if (el) {
+      el.querySelector('.subtask-status').textContent = '✅';
+      el.classList.remove('active'); el.classList.add('done');
+    }
+  } else if (ev.type === 'tool_call') {
+    // Suppress during subtask replay (same as main chat)
+    if (!document.querySelector('#cron-run-messages .subtask-item.active')) {
+      addCronMsg('🔧 ' + ev.tool + (ev.params?.action ? ' → ' + ev.params.action : ''), 'tool');
+    }
+  } else if (ev.type === 'stream_chunk') {
+    const idx = ev.index != null ? ev.index : 0;
+    const stream = document.getElementById('cron-subtask-stream-' + idx);
+    if (stream) {
+      window._cronRunText[idx] = (window._cronRunText[idx] || '') + ev.chunk;
+      stream.innerHTML = renderMd(window._cronRunText[idx]);
+      stream.classList.add('visible');
+    }
+  }
+}
+
+async function probeCronRun() {
+  const runId = window._viewingCronRun;
+  if (!runId) return;
+  try {
+    const res = await fetch('/api/jobs/runs/' + runId + '/probe');
+    const data = await res.json();
+    addCronMsg(_probeText(data), 'tool');
+  } catch(e) { addCronMsg('Probe failed: ' + e, 'tool'); }
 }
 
 // ── Settings Page ──

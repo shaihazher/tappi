@@ -554,9 +554,8 @@ class SubtaskRunner:
         self.prompt_tokens += agent.prompt_tokens
         self.completion_tokens += agent.completion_tokens
 
-        # Stream the response to UI (cosmetic only)
-        if self.on_stream_chunk and response:
-            self.on_stream_chunk(response)
+        # Note: streaming already happens live via agent._on_stream_chunk
+        # during LLM calls. No need to re-send the full response here.
 
         return response
 

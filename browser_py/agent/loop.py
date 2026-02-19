@@ -560,6 +560,7 @@ class Agent:
         abort_event = threading.Event()
 
         def on_subtask_start(st: Subtask) -> None:
+            _active_subtask_index[0] = st.index
             self._last_activity = {
                 "state": "subtask",
                 "index": st.index,
@@ -582,11 +583,15 @@ class Agent:
                 })
 
         # Stream chunks: broadcast to UI via subtask_progress callback
+        # Include the active subtask index so the UI knows where to render
+        _active_subtask_index = [0]  # mutable container for closure
+
         def on_stream_chunk(chunk: str) -> None:
             if self.on_subtask_progress:
                 self.on_subtask_progress({
                     "type": "stream_chunk",
                     "chunk": chunk,
+                    "index": _active_subtask_index[0],
                 })
 
         runner = SubtaskRunner(
