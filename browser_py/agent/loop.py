@@ -87,12 +87,17 @@ class Agent:
     The agent maintains conversation history and executes tools in a
     loop until the LLM produces a text response (no more tool calls).
 
+    For complex tasks, the agent decomposes the task into subtasks, each
+    executed by a focused mini-agent with its designated tool. The final
+    subtask compiles all outputs into a coherent response.
+
     Args:
         workspace: Override workspace directory.
         browser_profile: Default browser profile to use.
         on_tool_call: Callback when a tool is called (name, params, result).
         on_message: Callback when the LLM produces text.
         on_token_update: Callback when token usage updates (usage_dict).
+        on_subtask_progress: Callback for subtask decomposition progress.
         max_iterations: Safety limit on tool call loops (default: 50).
     """
 
@@ -104,6 +109,7 @@ class Agent:
         on_message: Callable[[str], None] | None = None,
         on_job_trigger: Callable[[dict], None] | None = None,
         on_token_update: Callable[[dict], None] | None = None,
+        on_subtask_progress: Callable[[dict], None] | None = None,
         max_iterations: int = 50,
     ) -> None:
         self.workspace = workspace or get_workspace()
@@ -112,6 +118,7 @@ class Agent:
         self.on_tool_call = on_tool_call
         self.on_message = on_message
         self.on_token_update = on_token_update
+        self.on_subtask_progress = on_subtask_progress
 
         # Initialize tools — browser downloads go to workspace/downloads
         downloads_dir = str(self.workspace / "downloads")
@@ -397,17 +404,131 @@ class Agent:
         self._do_context_dump("compaction")
 
     def chat(self, user_message: str) -> str:
-        """Send a message and get a response. Handles multi-step tool loops.
+        """Send a message and get a response.
 
-        Runs until the LLM produces a final text response (no more tool calls).
-        Context is automatically compacted when token usage exceeds 75% of
-        the model's context limit.
+        For complex tasks, decomposes into subtasks and runs each via a
+        focused mini-agent. For simple tasks (conversational, single tool
+        call), uses the direct tool-calling loop.
 
         Args:
             user_message: The user's message/task.
 
         Returns:
             The agent's final text response.
+        """
+        # If this agent has a custom system prompt, it's a sub-agent —
+        # skip decomposition and go straight to the direct loop.
+        if self._custom_system_prompt:
+            return self._chat_direct(user_message)
+
+        # Try to decompose the task
+        self._last_activity = {"state": "decomposing", "time": time.time()}
+        try:
+            from browser_py.agent.decompose import decompose_task, SubtaskRunner, Subtask
+            subtasks = decompose_task(user_message)
+        except Exception:
+            subtasks = None
+
+        if subtasks is None:
+            # Simple task — use direct loop
+            return self._chat_direct(user_message)
+
+        # Complex task — run via subtask decomposition
+        return self._chat_decomposed(user_message, subtasks)
+
+    def _chat_decomposed(self, user_message: str, subtasks: list) -> str:
+        """Execute a complex task via subtask decomposition.
+
+        Each subtask runs in a fresh mini-agent. Results are compiled by
+        the final compilation subtask. The main agent's conversation
+        history gets a summary of what happened.
+        """
+        import threading
+        from browser_py.agent.decompose import SubtaskRunner, Subtask
+
+        self.messages.append({"role": "user", "content": user_message})
+        self._abort = False
+        self._last_activity = {"state": "running_subtasks", "time": time.time()}
+
+        # Notify UI of decomposition plan
+        if self.on_subtask_progress:
+            self.on_subtask_progress({
+                "type": "plan",
+                "subtasks": [s.to_dict() for s in subtasks],
+            })
+
+        abort_event = threading.Event()
+
+        def on_subtask_start(st: Subtask) -> None:
+            self._last_activity = {
+                "state": "subtask",
+                "index": st.index,
+                "total": st.total,
+                "task": st.task[:100],
+                "tool": st.tool,
+                "time": time.time(),
+            }
+            if self.on_subtask_progress:
+                self.on_subtask_progress({
+                    "type": "subtask_start",
+                    "subtask": st.to_dict(),
+                })
+
+        def on_subtask_done(st: Subtask) -> None:
+            if self.on_subtask_progress:
+                self.on_subtask_progress({
+                    "type": "subtask_done",
+                    "subtask": st.to_dict(),
+                })
+
+        runner = SubtaskRunner(
+            subtasks=subtasks,
+            workspace=self.workspace,
+            browser_profile=self._browser._default_profile if hasattr(self._browser, '_default_profile') else None,
+            on_subtask_start=on_subtask_start,
+            on_subtask_done=on_subtask_done,
+            on_tool_call=self.on_tool_call,
+            on_token_update=self.on_token_update,
+            abort_event=abort_event,
+            original_task=user_message,
+        )
+
+        result = runner.run()
+
+        # Add summary to conversation history
+        summary_parts = [f"**Task decomposed into {len(subtasks)} subtasks:**\n"]
+        for st in subtasks:
+            status_icon = "✅" if st.status == "done" else "❌"
+            summary_parts.append(f"{status_icon} **Step {st.index + 1}** ({st.tool}): {st.task[:100]}")
+
+        if result.get("final_output"):
+            summary_parts.append(f"\n**Output directory:** `{result['output_dir']}`")
+            summary_parts.append(f"**Duration:** {result['duration_seconds']}s")
+
+        summary = "\n".join(summary_parts)
+        self.messages.append({"role": "assistant", "content": summary})
+
+        # Track aggregate tokens
+        self.total_tokens += result.get("total_tokens", 0)
+
+        # Return the final compiled output or summary
+        final_output = result.get("final_output", "")
+        if final_output:
+            response = final_output
+        else:
+            response = summary
+
+        if self.on_message:
+            self.on_message(response)
+
+        self._last_activity = {"state": "done", "time": time.time()}
+        return response
+
+    def _chat_direct(self, user_message: str) -> str:
+        """Direct tool-calling loop for simple tasks and sub-agents.
+
+        Runs until the LLM produces a final text response (no more tool calls).
+        Context is automatically compacted when token usage exceeds 75%.
         """
         self.messages.append({"role": "user", "content": user_message})
 

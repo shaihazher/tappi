@@ -49,6 +49,7 @@ def _get_agent() -> Agent:
             on_message=_on_message,
             on_job_trigger=_on_job_change,
             on_token_update=_on_token_update,
+            on_subtask_progress=_on_subtask_progress,
         )
         if not cfg.get("shell_enabled", True):
             _agent._shell.enabled = False
@@ -69,6 +70,12 @@ def _on_tool_call(name: str, params: dict, result: str) -> None:
 def _on_message(text: str) -> None:
     """Broadcast agent messages to WebSocket clients."""
     msg = json.dumps({"type": "message", "content": text})
+    _broadcast(msg)
+
+
+def _on_subtask_progress(data: dict) -> None:
+    """Broadcast subtask decomposition progress to WebSocket clients."""
+    msg = json.dumps({"type": "subtask_progress", **data})
     _broadcast(msg)
 
 
