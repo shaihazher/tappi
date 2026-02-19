@@ -169,6 +169,35 @@ Use markdown. Be thorough but readable.
 """
 
 
+# ── Helpers ──
+
+def _make_run_dirname(task: str) -> str:
+    """Create a human-friendly directory name from a task description.
+
+    Examples:
+        "Compare Python web frameworks" → "compare-python-web-frameworks-feb-19-6pm"
+        "Check my Gmail for new emails" → "check-gmail-for-new-emails-feb-19-6pm"
+    """
+    import re
+    from datetime import datetime
+
+    # Clean the task: lowercase, keep alphanumeric + spaces
+    clean = re.sub(r'[^a-zA-Z0-9\s]', '', task.lower())
+    # Take first ~6 meaningful words
+    words = clean.split()[:6]
+    # Remove filler words
+    fillers = {'the', 'a', 'an', 'and', 'or', 'to', 'for', 'of', 'in', 'on', 'my', 'me', 'is', 'it'}
+    words = [w for w in words if w not in fillers] or words[:3]
+    slug = '-'.join(words[:5]) or 'task'
+
+    # Add readable timestamp
+    now = datetime.now()
+    hour = now.strftime("%-I%p").lower()  # e.g. "6pm"
+    date_str = now.strftime("%b-%-d").lower()  # e.g. "feb-19"
+
+    return f"{slug}-{date_str}-{hour}"
+
+
 # ── Data Types ──
 
 class Subtask:
@@ -450,8 +479,8 @@ class SubtaskRunner:
         self.original_task = original_task
         self.research_query = research_query
 
-        # Working directory for subtask outputs
-        self.run_dir = workspace / "subtask_runs" / f"run_{int(time.time())}"
+        # Working directory for subtask outputs — human-friendly name
+        self.run_dir = workspace / _make_run_dirname(original_task or research_query or "task")
         self.run_dir.mkdir(parents=True, exist_ok=True)
 
         # Track the active sub-agent for probe

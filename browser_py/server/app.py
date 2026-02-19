@@ -1245,6 +1245,17 @@ _FALLBACK_HTML = """\
   .key-status.configured { color: var(--success); }
   .key-status.missing { color: var(--text-dim); }
 
+  /* Toggle switch */
+  .toggle-switch { display:flex; align-items:center; gap:6px; cursor:pointer; white-space:nowrap; }
+  .toggle-switch input { display:none; }
+  .toggle-slider { width:32px; height:18px; background:var(--border); border-radius:9px;
+    position:relative; transition:background 0.2s; flex-shrink:0; }
+  .toggle-slider::after { content:''; position:absolute; top:2px; left:2px;
+    width:14px; height:14px; background:#fff; border-radius:50%; transition:transform 0.2s; }
+  .toggle-switch input:checked + .toggle-slider { background:var(--accent); }
+  .toggle-switch input:checked + .toggle-slider::after { transform:translateX(14px); }
+  .toggle-label { font-size:11px; color:var(--text-dim); }
+
   /* Setup wizard steps */
   .wizard-steps { display: flex; gap: 4px; margin-bottom: 20px; }
   .wizard-step { flex: 1; height: 4px; border-radius: 2px; background: var(--border); }
@@ -1505,7 +1516,7 @@ _FALLBACK_HTML = """\
       <div class="wizard-section" id="wizard-4">
         <div class="card">
           <h3>Step 4: Browser Profile</h3>
-          <p>Each profile keeps its own logins and cookies.</p>
+          <p>Each profile keeps its own logins and cookies. The agent uses this browser to browse the web, fill forms, and interact with sites on your behalf.</p>
           <div class="field">
             <label>Profile</label>
             <select id="setup-browser-profile"></select>
@@ -1514,6 +1525,13 @@ _FALLBACK_HTML = """\
             <input type="text" id="setup-new-profile" placeholder="New profile name" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:13px;flex:1">
             <button class="btn secondary" onclick="setupCreateProfile()" style="white-space:nowrap">Create</button>
           </div>
+        </div>
+        <div class="card" style="background:rgba(88,166,255,0.06);border-color:rgba(88,166,255,0.2)">
+          <h3>🌍 Log in to your accounts (optional)</h3>
+          <p>Click the button below to open the browser. Log in to any sites you want the agent to access — Gmail, GitHub, social media, etc. Your sessions will be saved to this profile.</p>
+          <p style="color:var(--text-dim);font-size:12px;margin-top:4px">You can skip this and do it later from the sidebar.</p>
+          <button class="btn" onclick="setupLaunchBrowser()" id="setup-launch-browser" style="margin-top:10px">🌍 Open Browser</button>
+          <span id="setup-browser-status" style="font-size:12px;color:var(--text-dim);margin-left:8px"></span>
         </div>
         <div class="wizard-nav">
           <button class="btn secondary" onclick="wizardBack(4)">← Back</button>
@@ -1545,9 +1563,10 @@ _FALLBACK_HTML = """\
     <header>
       <h2>Chat</h2>
       <select id="profile-switcher" onchange="switchProfile()" title="Active browser profile" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text);font-size:12px;margin-left:auto;cursor:pointer"></select>
-      <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-dim);cursor:pointer;white-space:nowrap" title="Deep Mode: breaks complex tasks into focused subtasks for thorough results">
-        <input type="checkbox" id="decompose-toggle" checked onchange="toggleDecompose()" style="width:auto;margin:0">
-        Decompose
+      <label class="toggle-switch" title="Deep Mode: breaks complex tasks into focused subtasks for thorough results">
+        <input type="checkbox" id="decompose-toggle" checked onchange="toggleDecompose()">
+        <span class="toggle-slider"></span>
+        <span class="toggle-label">Deep</span>
       </label>
       <button class="btn secondary" onclick="probeAgent()" id="probe-btn" style="font-size:12px;padding:6px 10px" title="Check what the agent is doing right now">🔍 Probe</button>
       <button class="btn danger" onclick="flushAgent()" id="flush-btn" style="font-size:12px;padding:6px 10px" title="Stop the agent and dump context">⏹ Flush</button>
@@ -2309,6 +2328,25 @@ document.addEventListener('input', function(e) {
   }, 800);
 });
 
+async function setupLaunchBrowser() {
+  const profile = document.getElementById('setup-browser-profile').value || 'default';
+  const btn = document.getElementById('setup-launch-browser');
+  const status = document.getElementById('setup-browser-status');
+  btn.disabled = true;
+  btn.textContent = '🌍 Opening...';
+  try {
+    const res = await fetch('/api/profiles/launch', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ name: profile }),
+    });
+    const data = await res.json();
+    if (data.error) { status.textContent = 'Error: ' + data.error; return; }
+    btn.textContent = '🌍 Browser Open';
+    status.textContent = data.status === 'already_running' ? 'Already running — log in to your accounts, then click Next' : 'Browser launched — log in to your accounts, then click Next';
+  } catch(e) { status.textContent = 'Failed: ' + e; }
+  finally { setTimeout(() => { btn.disabled = false; }, 2000); }
+}
+
 async function setupCreateProfile() {
   const nameInput = document.getElementById('setup-new-profile');
   const name = nameInput.value.trim();
@@ -2458,6 +2496,22 @@ function connect() {
       if (msg.session_id) window._currentSessionId = msg.session_id;
       loadSessions();
     } else if (msg.type === 'token_update') {
+      // During decomposed tasks, also update the active step's token count
+      if (msg.subtask_total_tokens != null) {
+        const activeStep = document.querySelector('.subtask-item.active');
+        if (activeStep) {
+          let badge = activeStep.querySelector('.step-tokens');
+          if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'step-tokens';
+            badge.style.cssText = 'font-size:10px;color:var(--text-dim);margin-left:auto';
+            activeStep.querySelector('.subtask-header').appendChild(badge);
+          }
+          const ctx = msg.context_used || msg.total_tokens || 0;
+          const limit = msg.context_limit || 1;
+          badge.textContent = Math.round(ctx/1000) + 'k / ' + Math.round(limit/1000) + 'k';
+        }
+      }
       updateTokenBar(msg);
     } else if (msg.type === 'context_warning') {
       updateTokenBar(msg.usage);
