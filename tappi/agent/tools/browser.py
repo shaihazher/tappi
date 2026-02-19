@@ -35,6 +35,7 @@ TOOL_SCHEMA = {
                         "screenshot", "scroll", "url", "back", "forward",
                         "refresh", "upload", "wait", "profiles",
                         "create_profile", "switch_profile",
+                        "click_xy", "hover_xy", "drag_xy", "iframe_rect",
                     ],
                     "description": (
                         "Browser action to perform:\n"
@@ -59,7 +60,12 @@ TOOL_SCHEMA = {
                         "- url: Get current URL\n"
                         "- back/forward/refresh: Navigate history\n"
                         "- upload: Upload file (requires 'path', optional 'selector')\n"
-                        "- wait: Wait milliseconds (requires 'ms')"
+                        "- wait: Wait milliseconds (requires 'ms')\n"
+                        "\nCoordinate commands (for cross-origin iframes, captchas, overlays):\n"
+                        "- click_xy: Click at page coordinates (requires 'x', 'y'; optional 'double', 'right')\n"
+                        "- hover_xy: Hover at page coordinates (requires 'x', 'y')\n"
+                        "- drag_xy: Drag between coordinates (requires 'x', 'y', 'x2', 'y2')\n"
+                        "- iframe_rect: Get iframe bounding box for targeting (requires 'selector')"
                     ),
                 },
                 "url": {"type": "string", "description": "URL for open/newtab actions"},
@@ -73,6 +79,12 @@ TOOL_SCHEMA = {
                 "ms": {"type": "integer", "description": "Milliseconds to wait"},
                 "query": {"type": "string", "description": "Search query for search action"},
                 "profile": {"type": "string", "description": "Browser profile name for launch"},
+                "x": {"type": "number", "description": "X page coordinate for click_xy/hover_xy/drag_xy"},
+                "y": {"type": "number", "description": "Y page coordinate for click_xy/hover_xy/drag_xy"},
+                "x2": {"type": "number", "description": "End X coordinate for drag_xy"},
+                "y2": {"type": "number", "description": "End Y coordinate for drag_xy"},
+                "double": {"type": "boolean", "description": "Double-click for click_xy"},
+                "right": {"type": "boolean", "description": "Right-click for click_xy"},
             },
             "required": ["action"],
         },
@@ -275,6 +287,28 @@ class BrowserTool:
             elif action == "wait":
                 ms = int(params.get("ms", 1000))
                 return browser.wait(ms)
+
+            # Coordinate commands
+            elif action == "click_xy":
+                x = float(params.get("x", 0))
+                y = float(params.get("y", 0))
+                double = bool(params.get("double", False))
+                right = bool(params.get("right", False))
+                return browser.click_xy(x, y, double=double, right=right)
+
+            elif action == "hover_xy":
+                return browser.hover_xy(float(params.get("x", 0)), float(params.get("y", 0)))
+
+            elif action == "drag_xy":
+                return browser.drag_xy(
+                    float(params.get("x", 0)), float(params.get("y", 0)),
+                    float(params.get("x2", 0)), float(params.get("y2", 0)),
+                )
+
+            elif action == "iframe_rect":
+                sel = params.get("selector", "iframe")
+                info = browser.iframe_rect(sel)
+                return f"x={info['x']} y={info['y']} w={info['width']} h={info['height']} center=({info['cx']}, {info['cy']})"
 
             else:
                 return f"Unknown action: {action}"
