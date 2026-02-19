@@ -237,6 +237,7 @@ class Agent:
             tools=self._tool_schemas,
             tool_choice="auto",
             max_tokens=4096,
+            timeout=120,  # 2 min — prevents orphaned threads on flush
         )
 
         # OpenRouter: use openai-compatible base_url so ALL model IDs work,
