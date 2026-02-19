@@ -2,8 +2,15 @@
 
 The decomposer LLM call converts a user request into an ordered list of
 subtasks, each paired with the tool it needs. A runner iterates through
-them sequentially, executing each via a focused mini-agent loop. The
-final subtask is always a compilation step.
+them sequentially, executing each via a focused mini-agent loop.
+
+Key design:
+- Subtask agents browse/gather data, then produce their report as their
+  TEXT RESPONSE (not a file write tool call). The runner captures and saves it.
+- The final compilation step is a single LLM call (no tools) that reads all
+  subtask outputs and produces a final report as text.
+- Subtask text responses stream to WebSocket for live UI updates but do NOT
+  pollute the main agent's context.
 
 Deep research is a specialization: fixed 5-subtopic decomposition where
 each subtask uses the browser/search tool and must visit 3 URLs.
@@ -61,48 +68,38 @@ User task: {task}
 """
 
 SUBTASK_SYSTEM_PROMPT = """\
-You are a focused task executor. Today is {today}.
+You are a focused research agent. Today is {today}.
 
-You have ONE job: complete the task below using the {tool} tool. \
-Write your findings/results to: **{output_file}**
+You have ONE job: complete the task below using the {tool} tool, then \
+write your findings as your final response.
 
 Your workspace is: {workspace}
 
-## Context Window
-{context_limit:,} tokens available. If compacted, use `files grep` on \
-`context_dumps/` to recover details.
-
-## Prior Results
-{prior_context}
-
 ## Rules
-- Stay focused on your specific task.
-- Write results to the output file using the files tool.
-- Be thorough but efficient.
-- When done, confirm what you wrote and where.
+- Stay focused — do NOT go on tangents.
+- Be EFFICIENT. Aim for under 10 tool calls total.
+- When you have enough information, STOP browsing and write your report.
+- Your final text response IS your output — do NOT call any file write tool.
+- Include source URLs as citations in your report.
+- Write a thorough report with key facts, data points, and citations. \
+Not a summary — a proper report.
 """
 
 COMPILE_SYSTEM_PROMPT = """\
 You are a compilation agent. Today is {today}.
 
-Your job: read all the subtask outputs listed below and compile them into \
-a comprehensive, well-structured final response.
-
-Your workspace is: {workspace}
-
-## Subtask Outputs
-{subtask_outputs}
-
 ## Original Task
 {original_task}
 
-## Instructions
-1. Read each subtask output file using the files tool.
-2. Synthesize everything into a coherent final output.
-3. Write the compiled result to: **{output_file}**
-4. Then provide a summary as your response.
+## Subtask Reports
+{subtask_reports}
 
-Make it thorough, well-organized, and directly useful. Use markdown formatting.
+## Instructions
+Compile the subtask reports above into a comprehensive, well-structured \
+final report. Organize by theme, highlight key insights, include all \
+source URLs in a References section. Use markdown formatting.
+
+Write a thorough, readable report — not a summary of summaries.
 """
 
 # ── Deep Research Prompts ──
@@ -135,17 +132,16 @@ Your workspace is: {workspace}
 2. From the results, pick exactly 3 URLs that look most relevant.
 3. For each URL: open it (action="open"), read its content (action="text"), \
 and extract key findings.
-4. Write ALL findings to: **{output_file}** using the files tool.
+4. After visiting all 3 URLs, STOP browsing and write your report as your \
+final text response.
 
 ## Key Rules
 - You MUST visit exactly 3 URLs (not more, not less).
-- Use action="text" to read page content (not elements).
-- Include source URLs in your notes.
-- Write findings as bullet points with data, stats, and key takeaways.
+- Use action="text" to read page content.
+- Do NOT call any file write tool — your text response IS your output.
+- Include source URLs as citations.
+- Write detailed findings with data, stats, and key takeaways.
 - Be efficient — don't waste tool calls.
-
-## Context Window
-{context_limit:,} tokens available.
 """
 
 RESEARCH_COMPILE_PROMPT = """\
@@ -154,12 +150,13 @@ You are a research report compiler. Today is {today}.
 ## Original Research Query
 {query}
 
-## Instructions
-Read all {n} research findings files listed below, then compile them into \
-a comprehensive, well-structured research report. Write it to: **{output_file}**
+## Research Findings
 
-Subtask output files:
-{file_list}
+{findings}
+
+## Instructions
+Compile the research findings above into a comprehensive, well-structured \
+research report.
 
 The report should:
 1. Start with an executive summary
@@ -199,10 +196,10 @@ class Subtask:
         }
 
 
-# ── Decomposition ──
+# ── LLM Helpers ──
 
 def _call_llm_simple(prompt: str, system: str = "", max_tokens: int = 4096) -> str:
-    """Single LLM call without tools — for decomposition/compilation planning."""
+    """Single LLM call without tools — for decomposition."""
     import litellm
     import os
 
@@ -231,8 +228,8 @@ def _call_llm_simple(prompt: str, system: str = "", max_tokens: int = 4096) -> s
         timeout=cfg.get("timeout", 300),
     )
 
-    # Reasoning effort
-    reasoning = cfg.get("reasoning_effort", "medium")
+    # Reasoning effort — optional, off by default
+    reasoning = cfg.get("reasoning_effort")
     if reasoning:
         kwargs["reasoning_effort"] = reasoning
 
@@ -245,61 +242,99 @@ def _call_llm_simple(prompt: str, system: str = "", max_tokens: int = 4096) -> s
     return response.choices[0].message.content or ""
 
 
-def decompose_task(task: str) -> list[Subtask] | None:
-    """Decompose a task into subtasks. Returns None if the task is simple.
+def _call_llm_streaming(system: str, prompt: str, max_tokens: int = 16384,
+                         on_chunk: Callable[[str], None] | None = None) -> str:
+    """Single LLM call with streaming — for compilation.
 
-    Makes a single LLM call to analyze the task and either returns None
-    (simple, handle directly) or a list of Subtask objects.
+    Streams chunks via on_chunk callback, returns full text.
+    No tools, just text generation.
     """
+    import litellm
+    import os
+
+    provider = get_provider()
+    key = get_provider_key(provider)
+    model = get_model()
+
+    if provider == "openrouter":
+        os.environ["OPENROUTER_API_KEY"] = key
+    elif provider in ("anthropic", "claude_max"):
+        os.environ["ANTHROPIC_API_KEY"] = key
+    elif provider == "openai":
+        os.environ["OPENAI_API_KEY"] = key
+
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": prompt},
+    ]
+
+    cfg = get_agent_config()
+    kwargs = dict(
+        model=model,
+        messages=messages,
+        max_tokens=max_tokens,
+        timeout=cfg.get("timeout", 300),
+        stream=True,
+    )
+
+    reasoning = cfg.get("reasoning_effort")
+    if reasoning:
+        kwargs["reasoning_effort"] = reasoning
+
+    if provider == "openrouter":
+        kwargs["api_key"] = key
+        kwargs["base_url"] = "https://openrouter.ai/api/v1"
+        kwargs["model"] = f"openai/{model}"
+
+    response = litellm.completion(**kwargs)
+
+    full_text = []
+    for chunk in response:
+        delta = chunk.choices[0].delta if chunk.choices else None
+        if delta and delta.content:
+            full_text.append(delta.content)
+            if on_chunk:
+                on_chunk(delta.content)
+
+    return "".join(full_text)
+
+
+# ── Decomposition ──
+
+def decompose_task(task: str) -> list[Subtask] | None:
+    """Decompose a task into subtasks. Returns None if the task is simple."""
     today = date.today().strftime("%B %d, %Y")
     prompt = DECOMPOSE_PROMPT.format(task=task, today=today)
-
     response = _call_llm_simple(prompt)
     return _parse_decomposition(response)
 
 
 def decompose_research(query: str, num_topics: int = 5) -> list[Subtask]:
-    """Decompose a research query into fixed subtopics + compilation.
-
-    Always returns exactly num_topics + 1 subtasks (last = compile).
-    """
+    """Decompose a research query into fixed subtopics + compilation."""
     today = date.today().strftime("%B %d, %Y")
-    prompt = RESEARCH_DECOMPOSE_PROMPT.format(
-        query=query, n=num_topics, today=today,
-    )
-
+    prompt = RESEARCH_DECOMPOSE_PROMPT.format(query=query, n=num_topics, today=today)
     response = _call_llm_simple(prompt)
     subtopics = _parse_subtopics(response)
 
-    # Fallback if parsing fails
     if len(subtopics) < num_topics:
         subtopics = [
             {"subtopic": f"Aspect {i+1}", "task": f"Research aspect {i+1} of: {query}"}
             for i in range(num_topics)
         ]
 
-    total = num_topics + 1  # +1 for compilation
+    total = num_topics + 1
     subtasks = []
-
     for i, st in enumerate(subtopics[:num_topics]):
         subtasks.append(Subtask(
-            task=st["task"],
-            tool="browser",
-            output=f"findings_{i+1}.md",
-            index=i,
-            total=total,
+            task=st["task"], tool="browser",
+            output=f"findings_{i+1}.md", index=i, total=total,
         ))
 
-    # Compilation subtask
     file_list = ", ".join(f"findings_{i+1}.md" for i in range(num_topics))
     subtasks.append(Subtask(
         task=f"Compile all {num_topics} research findings ({file_list}) into a final report",
-        tool="compile",
-        output="final_report.md",
-        index=num_topics,
-        total=total,
+        tool="compile", output="final_report.md", index=num_topics, total=total,
     ))
-
     return subtasks
 
 
@@ -307,12 +342,9 @@ def _parse_decomposition(text: str) -> list[Subtask] | None:
     """Parse the decomposer response into subtasks or None (simple)."""
     import re
 
-    # Try to extract JSON from response
-    # Pattern 1: ```json ... ```
     match = re.search(r'```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```', text, re.DOTALL)
     raw = match.group(1) if match else None
 
-    # Pattern 2: bare JSON
     if not raw:
         match = re.search(r'(\{[^{}]*"simple"[^{}]*\})', text, re.DOTALL)
         if match:
@@ -324,18 +356,16 @@ def _parse_decomposition(text: str) -> list[Subtask] | None:
             raw = match.group(1)
 
     if not raw:
-        return None  # Can't parse — treat as simple
+        return None
 
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
         return None
 
-    # Simple task
     if isinstance(parsed, dict) and parsed.get("simple"):
         return None
 
-    # Complex task — list of subtasks
     if not isinstance(parsed, list) or len(parsed) < 2:
         return None
 
@@ -348,38 +378,37 @@ def _parse_decomposition(text: str) -> list[Subtask] | None:
             task=item.get("task", ""),
             tool=item.get("tool", "browser"),
             output=item.get("output", f"step_{i+1}.md"),
-            index=i,
-            total=total,
+            index=i, total=total,
         ))
-
     return subtasks if len(subtasks) >= 2 else None
 
 
 def _parse_subtopics(text: str) -> list[dict[str, str]]:
     """Extract subtopics JSON from the planner's response."""
     import re
-
     match = re.search(r'```(?:json)?\s*(\[.*?\])\s*```', text, re.DOTALL)
     if match:
         try:
             return json.loads(match.group(1))
         except json.JSONDecodeError:
             pass
-
     match = re.search(r'\[.*\]', text, re.DOTALL)
     if match:
         try:
             return json.loads(match.group())
         except json.JSONDecodeError:
             pass
-
     return []
 
 
 # ── Subtask Runner ──
 
 class SubtaskRunner:
-    """Executes a list of subtasks sequentially, each with a focused mini-agent.
+    """Executes a list of subtasks sequentially.
+
+    Browsing subtasks: mini-agent with tools → text response = output.
+    Compile subtask: single streaming LLM call → text = output.
+    All outputs saved to disk by the runner, not by the agents.
 
     Args:
         subtasks: Ordered list of Subtask objects (last should be compile).
@@ -389,6 +418,7 @@ class SubtaskRunner:
         on_subtask_done: Callback(subtask) when a subtask completes.
         on_tool_call: Callback(name, params, result) for tool execution events.
         on_token_update: Callback(usage_dict) for token tracking.
+        on_stream_chunk: Callback(chunk_text) for streaming text to UI.
         abort_event: Threading event to cancel early.
         original_task: The original user task (for compilation context).
         research_query: If set, use research-specific prompts.
@@ -403,6 +433,7 @@ class SubtaskRunner:
         on_subtask_done: Callable[[Subtask], None] | None = None,
         on_tool_call: Callable[[str, dict, str], None] | None = None,
         on_token_update: Callable[[dict], None] | None = None,
+        on_stream_chunk: Callable[[str], None] | None = None,
         abort_event: Any = None,
         original_task: str = "",
         research_query: str | None = None,
@@ -414,6 +445,7 @@ class SubtaskRunner:
         self.on_subtask_done = on_subtask_done or (lambda s: None)
         self.on_tool_call = on_tool_call
         self.on_token_update = on_token_update
+        self.on_stream_chunk = on_stream_chunk
         self.abort_event = abort_event
         self.original_task = original_task
         self.research_query = research_query
@@ -430,75 +462,17 @@ class SubtaskRunner:
         self.prompt_tokens = 0
         self.completion_tokens = 0
 
-    def _build_subtask_system_prompt(self, subtask: Subtask, prior_results: list[tuple[str, str]]) -> str:
-        """Build system prompt for a subtask's mini-agent."""
+    def _build_subtask_system_prompt(self, subtask: Subtask) -> str:
+        """Build system prompt for a browsing subtask's mini-agent."""
         today = date.today().strftime("%B %d, %Y")
-        from browser_py.agent.sessions import get_context_limit
-        model = get_model()
-        context_limit = get_context_limit(model)
-        output_file = str(self.run_dir.relative_to(self.workspace) / subtask.output)
 
-        # Build prior context summary
-        if prior_results:
-            prior_lines = []
-            for name, path in prior_results:
-                prior_lines.append(f"- **{name}**: written to `{path}`")
-            prior_context = "Previous subtasks completed:\n" + "\n".join(prior_lines)
-        else:
-            prior_context = "This is the first subtask — no prior results."
-
-        # Research subtask uses specialized prompt
         if self.research_query and subtask.tool == "browser":
             return RESEARCH_SUBTASK_SYSTEM_PROMPT.format(
-                today=today,
-                workspace=self.workspace,
-                output_file=output_file,
-                context_limit=context_limit,
+                today=today, workspace=self.workspace,
             )
 
         return SUBTASK_SYSTEM_PROMPT.format(
-            today=today,
-            tool=subtask.tool,
-            output_file=output_file,
-            workspace=self.workspace,
-            context_limit=context_limit,
-            prior_context=prior_context,
-        )
-
-    def _build_compile_prompt(self, subtask: Subtask) -> str:
-        """Build system prompt for the compilation subtask."""
-        today = date.today().strftime("%B %d, %Y")
-        output_file = str(self.run_dir.relative_to(self.workspace) / subtask.output)
-
-        # Collect all prior output files
-        subtask_outputs = []
-        for st in self.subtasks:
-            if st.index == subtask.index:
-                break
-            if st.status == "done":
-                path = str(self.run_dir.relative_to(self.workspace) / st.output)
-                subtask_outputs.append(f"- `{path}` — {st.task[:100]}")
-
-        outputs_text = "\n".join(subtask_outputs) if subtask_outputs else "No prior outputs found."
-
-        # Research compilation
-        if self.research_query:
-            file_list = "\n".join(f"- `{self.run_dir.relative_to(self.workspace) / st.output}`"
-                                  for st in self.subtasks if st.index < subtask.index)
-            return RESEARCH_COMPILE_PROMPT.format(
-                today=today,
-                query=self.research_query,
-                n=subtask.index,
-                output_file=output_file,
-                file_list=file_list,
-            )
-
-        return COMPILE_SYSTEM_PROMPT.format(
-            today=today,
-            workspace=self.workspace,
-            subtask_outputs=outputs_text,
-            original_task=self.original_task,
-            output_file=output_file,
+            today=today, tool=subtask.tool, workspace=self.workspace,
         )
 
     def _create_mini_agent(self, system_prompt: str) -> 'Agent':
@@ -511,63 +485,63 @@ class SubtaskRunner:
             browser_profile=self.browser_profile or cfg.get("browser_profile"),
             on_tool_call=self.on_tool_call,
             on_token_update=self._on_sub_token_update,
-            max_iterations=50,
+            max_iterations=15,
         )
         if not cfg.get("shell_enabled", True):
             agent._shell.enabled = False
         agent._custom_system_prompt = system_prompt
+        # Wire streaming: sub-agent streams text chunks to UI
+        agent._on_stream_chunk = self.on_stream_chunk
         return agent
 
     def _on_sub_token_update(self, usage: dict) -> None:
-        """Aggregate token usage from sub-agents."""
-        # We track cumulative across all subtasks
         if self.on_token_update:
             usage["subtask_total_tokens"] = self.total_tokens
             self.on_token_update(usage)
 
-    def run_subtask(self, subtask: Subtask, prior_results: list[tuple[str, str]]) -> str:
-        """Execute a single subtask and return the output file path (relative)."""
+    def run_subtask(self, subtask: Subtask) -> str:
+        """Execute a single subtask. Returns the text output."""
         start = time.time()
         subtask.status = "running"
         self.on_subtask_start(subtask)
 
-        output_rel = str(self.run_dir.relative_to(self.workspace) / subtask.output)
-        output_abs = self.run_dir / subtask.output
+        output_path = self.run_dir / subtask.output
 
-        # Pick system prompt based on whether this is compile or regular
         if subtask.tool == "compile":
-            system_prompt = self._build_compile_prompt(subtask)
-            max_tokens = get_agent_config().get("main_max_tokens", 16384)
+            # Compilation: single streaming LLM call, no tools
+            text = self._run_compile(subtask)
         else:
-            system_prompt = self._build_subtask_system_prompt(subtask, prior_results)
-            max_tokens = get_agent_config().get("subagent_max_tokens", 4096)
+            # Browsing subtask: mini-agent with tools → text response
+            text = self._run_browsing_subtask(subtask)
 
+        # Runner writes to disk — agent never touches files
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(text or f"# Subtask {subtask.index + 1}\n\n*No output produced.*\n")
+
+        subtask.status = "done"
+        subtask.duration = time.time() - start
+        subtask.result = text
+        self.on_subtask_done(subtask)
+        return text
+
+    def _run_browsing_subtask(self, subtask: Subtask) -> str:
+        """Run a browsing subtask via mini-agent. Returns text response."""
+        system_prompt = self._build_subtask_system_prompt(subtask)
         agent = self._create_mini_agent(system_prompt)
         self.active_agent = agent
 
-        # Build the task prompt
         task_prompt = subtask.task
-        if self.research_query and subtask.tool == "browser":
+        if self.research_query:
             task_prompt = (
                 f"Research this subtopic: {subtask.task}\n\n"
                 f"Search Google, pick 3 relevant URLs from results, visit each one, "
-                f"read the content, and write detailed findings to: {output_rel}"
-            )
-        elif subtask.tool != "compile":
-            task_prompt = f"{subtask.task}\n\nWrite your results to: {output_rel}"
-        else:
-            task_prompt = (
-                f"{subtask.task}\n\n"
-                f"Read all the subtask output files listed in your instructions, "
-                f"compile them, and write the final result to: {output_rel}"
+                f"read the content. Then write your detailed findings as your response."
             )
 
         try:
             response = agent.chat(task_prompt)
         except Exception as e:
-            response = f"Error: {e}"
-            output_abs.parent.mkdir(parents=True, exist_ok=True)
-            output_abs.write_text(f"# Subtask {subtask.index + 1} — FAILED\n\n{e}\n")
+            response = f"# Subtask {subtask.index + 1} — FAILED\n\n{e}\n"
         finally:
             try:
                 agent.cleanup_browser()
@@ -580,43 +554,70 @@ class SubtaskRunner:
         self.prompt_tokens += agent.prompt_tokens
         self.completion_tokens += agent.completion_tokens
 
-        # If the agent didn't write the output file, save its response
-        if not output_abs.exists() and response.strip():
-            output_abs.parent.mkdir(parents=True, exist_ok=True)
-            output_abs.write_text(f"# Subtask {subtask.index + 1}\n\n{response}\n")
+        # Stream the response to UI (cosmetic only)
+        if self.on_stream_chunk and response:
+            self.on_stream_chunk(response)
 
-        subtask.status = "done"
-        subtask.duration = time.time() - start
-        subtask.result = output_rel
-        self.on_subtask_done(subtask)
+        return response
 
-        return output_rel
+    def _run_compile(self, subtask: Subtask) -> str:
+        """Run compilation as a single streaming LLM call. No tools."""
+        today = date.today().strftime("%B %d, %Y")
+
+        # Read all prior subtask outputs
+        reports = []
+        for st in self.subtasks:
+            if st.index >= subtask.index:
+                break
+            path = self.run_dir / st.output
+            if path.exists():
+                try:
+                    content = path.read_text()
+                    reports.append(f"### Subtask {st.index + 1}: {st.task[:80]}\n\n{content}")
+                except OSError:
+                    reports.append(f"### Subtask {st.index + 1}\n\n*File not found*")
+
+        findings = "\n\n---\n\n".join(reports) if reports else "*No subtask outputs found.*"
+
+        if self.research_query:
+            system = f"You are a research report compiler. Today is {today}."
+            prompt = RESEARCH_COMPILE_PROMPT.format(
+                today=today, query=self.research_query,
+                findings=findings,
+            )
+        else:
+            system = f"You are a report compiler. Today is {today}."
+            prompt = COMPILE_SYSTEM_PROMPT.format(
+                today=today, original_task=self.original_task,
+                subtask_reports=findings,
+            )
+
+        # Stream compilation to UI
+        text = _call_llm_streaming(
+            system=system,
+            prompt=prompt,
+            max_tokens=16384,
+            on_chunk=self.on_stream_chunk,
+        )
+        return text
 
     def run(self) -> dict[str, Any]:
         """Execute all subtasks sequentially. Returns result dict."""
         start = time.time()
-        prior_results: list[tuple[str, str]] = []
 
         for subtask in self.subtasks:
             if self.abort_event and self.abort_event.is_set():
                 subtask.status = "failed"
                 break
-
-            output_path = self.run_subtask(subtask, prior_results)
-            prior_results.append((subtask.task[:80], output_path))
+            self.run_subtask(subtask)
 
         duration = time.time() - start
 
-        # Read the final output (last subtask's output)
+        # Final output = last completed subtask's result
         final_output = ""
         last_done = [s for s in self.subtasks if s.status == "done"]
         if last_done:
-            final_path = self.run_dir / last_done[-1].output
-            if final_path.exists():
-                try:
-                    final_output = final_path.read_text()
-                except OSError:
-                    pass
+            final_output = last_done[-1].result or ""
 
         return {
             "subtasks": [s.to_dict() for s in self.subtasks],

@@ -247,8 +247,8 @@ class Agent:
             # Vertex uses GOOGLE_APPLICATION_CREDENTIALS
             pass
 
-    def _call_llm(self) -> dict:
-        """Make a single LLM call and return the response."""
+    def _build_llm_kwargs(self) -> dict:
+        """Build common kwargs for LLM calls."""
         import litellm
 
         self._setup_litellm()
@@ -266,40 +266,130 @@ class Agent:
             timeout=self._get_timeout(),
         )
 
-        # Reasoning effort — controls how hard the model thinks.
-        # Supported by Anthropic (low/medium/high) and OpenAI.
+        # Reasoning effort — optional, off by default
         cfg = get_agent_config()
-        reasoning = cfg.get("reasoning_effort", "medium")
+        reasoning = cfg.get("reasoning_effort")
         if reasoning:
             kwargs["reasoning_effort"] = reasoning
 
-        # OpenRouter: use openai-compatible base_url so ALL model IDs work,
-        # including meta-routers like openrouter/free, openrouter/auto.
-        # LiteLLM's native openrouter/ prefix chokes on those.
+        # OpenRouter compatibility
         if provider == "openrouter":
             key = get_provider_key(provider)
             kwargs["api_key"] = key
             kwargs["base_url"] = "https://openrouter.ai/api/v1"
-            # Tell LiteLLM to treat this as an OpenAI-compatible call.
-            # The model ID is sent as-is to OpenRouter's API.
             kwargs["model"] = f"openai/{model}"
 
-        response = litellm.completion(**kwargs)
+        return kwargs
 
-        # Track token usage
+    def _call_llm(self) -> dict:
+        """Make a single LLM call and return the response (non-streaming)."""
+        import litellm
+        kwargs = self._build_llm_kwargs()
+        response = litellm.completion(**kwargs)
+        self._track_usage(response)
+        return response
+
+    def _call_llm_stream(self, on_chunk: Callable[[str], None] | None = None):
+        """Make a streaming LLM call. Returns a synthetic response object.
+
+        Streams text chunks via on_chunk callback. Accumulates tool calls.
+        Returns an object matching the non-streaming response shape.
+        """
+        import litellm
+        kwargs = self._build_llm_kwargs()
+        kwargs["stream"] = True
+        kwargs["stream_options"] = {"include_usage": True}
+
+        response_stream = litellm.completion(**kwargs)
+
+        # Accumulate the full response from chunks
+        content_parts = []
+        tool_calls_map: dict[int, dict] = {}  # index -> {id, name, arguments}
+        finish_reason = None
+
+        for chunk in response_stream:
+            if not chunk.choices:
+                # Final chunk with usage info
+                usage = getattr(chunk, "usage", None)
+                if usage:
+                    self._track_usage_raw(
+                        getattr(usage, "prompt_tokens", 0) or 0,
+                        getattr(usage, "completion_tokens", 0) or 0,
+                    )
+                continue
+
+            delta = chunk.choices[0].delta
+            finish_reason = chunk.choices[0].finish_reason or finish_reason
+
+            # Text content
+            if delta and delta.content:
+                content_parts.append(delta.content)
+                if on_chunk:
+                    on_chunk(delta.content)
+
+            # Tool calls (accumulated across chunks)
+            if delta and delta.tool_calls:
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if idx not in tool_calls_map:
+                        tool_calls_map[idx] = {
+                            "id": tc_delta.id or "",
+                            "name": "",
+                            "arguments": "",
+                        }
+                    if tc_delta.id:
+                        tool_calls_map[idx]["id"] = tc_delta.id
+                    if tc_delta.function:
+                        if tc_delta.function.name:
+                            tool_calls_map[idx]["name"] = tc_delta.function.name
+                        if tc_delta.function.arguments:
+                            tool_calls_map[idx]["arguments"] += tc_delta.function.arguments
+
+        # Build synthetic response matching non-streaming shape
+        content = "".join(content_parts) if content_parts else None
+
+        # Build tool_calls list
+        tool_calls = None
+        if tool_calls_map:
+            tool_calls = []
+            for idx in sorted(tool_calls_map.keys()):
+                tc = tool_calls_map[idx]
+                tool_calls.append(type("ToolCall", (), {
+                    "id": tc["id"],
+                    "function": type("Function", (), {
+                        "name": tc["name"],
+                        "arguments": tc["arguments"],
+                    })(),
+                })())
+
+        # Build response object
+        message = type("Message", (), {
+            "content": content,
+            "tool_calls": tool_calls,
+        })()
+        choice = type("Choice", (), {
+            "message": message,
+            "finish_reason": finish_reason,
+        })()
+        return type("Response", (), {"choices": [choice]})()
+
+    def _track_usage(self, response) -> None:
+        """Track token usage from a non-streaming response."""
         usage = getattr(response, "usage", None)
         if usage:
-            call_prompt = getattr(usage, "prompt_tokens", 0) or 0
-            call_completion = getattr(usage, "completion_tokens", 0) or 0
-            self._last_prompt_tokens = call_prompt
-            self.prompt_tokens += call_prompt
-            self.completion_tokens += call_completion
-            self.total_tokens = self.prompt_tokens + self.completion_tokens
+            self._track_usage_raw(
+                getattr(usage, "prompt_tokens", 0) or 0,
+                getattr(usage, "completion_tokens", 0) or 0,
+            )
 
-            if self.on_token_update:
-                self.on_token_update(self.get_token_usage())
-
-        return response
+    def _track_usage_raw(self, prompt_tokens: int, completion_tokens: int) -> None:
+        """Track raw token counts."""
+        self._last_prompt_tokens = prompt_tokens
+        self.prompt_tokens += prompt_tokens
+        self.completion_tokens += completion_tokens
+        self.total_tokens = self.prompt_tokens + self.completion_tokens
+        if self.on_token_update:
+            self.on_token_update(self.get_token_usage())
 
     def _execute_tool(self, name: str, arguments: dict) -> str:
         """Execute a tool and return the result string."""
@@ -491,6 +581,14 @@ class Agent:
                     "subtask": st.to_dict(),
                 })
 
+        # Stream chunks: broadcast to UI via subtask_progress callback
+        def on_stream_chunk(chunk: str) -> None:
+            if self.on_subtask_progress:
+                self.on_subtask_progress({
+                    "type": "stream_chunk",
+                    "chunk": chunk,
+                })
+
         runner = SubtaskRunner(
             subtasks=subtasks,
             workspace=self.workspace,
@@ -499,6 +597,7 @@ class Agent:
             on_subtask_done=on_subtask_done,
             on_tool_call=self.on_tool_call,
             on_token_update=self.on_token_update,
+            on_stream_chunk=on_stream_chunk,
             abort_event=abort_event,
             original_task=user_message,
         )
@@ -566,7 +665,11 @@ class Agent:
             # Check if context needs compacting before calling LLM
             self._last_activity = {"state": "calling_llm", "iteration": iteration, "time": time.time()}
             self._check_context_compact()
-            response = self._call_llm()
+
+            # Stream all LLM calls — text chunks fire on_stream callback
+            # (for sub-agents this streams findings to the UI)
+            stream_cb = getattr(self, '_on_stream_chunk', None)
+            response = self._call_llm_stream(on_chunk=stream_cb)
             choice = response.choices[0]
             msg = choice.message
 
@@ -655,9 +758,9 @@ class Agent:
 
             # Continue loop — LLM will see tool results and decide next step
 
-            # Safety valve — prevent truly infinite loops
-            if iteration >= 500:
-                return "(Safety limit: 500 iterations reached.)"
+            # Safety valve — respect max_iterations
+            if iteration >= self.max_iterations:
+                return f"(Safety limit: {self.max_iterations} iterations reached.)"
 
     def _try_parse_text_tool_call(self, text: str) -> dict | None:
         """Try to extract a tool call from text output.
