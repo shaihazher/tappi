@@ -816,6 +816,7 @@ class Browser:
         user_data_dir: str | None = None,
         headless: bool = False,
         chrome_path: str | None = None,
+        download_dir: str | None = None,
     ) -> subprocess.Popen:
         """Launch Chrome/Chromium with remote debugging enabled.
 
@@ -874,6 +875,32 @@ class Browser:
         while time.monotonic() < deadline:
             try:
                 json.loads(urlopen(f"http://127.0.0.1:{port}/json/version").read())
+                # Set download directory if specified
+                if download_dir:
+                    dl_path = str(Path(download_dir).expanduser().resolve())
+                    os.makedirs(dl_path, exist_ok=True)
+                    try:
+                        browser_cdp = CDPSession.connect_to_browser(
+                            f"http://127.0.0.1:{port}"
+                        )
+                        # Get the first page target to set download behavior
+                        targets = json.loads(
+                            urlopen(f"http://127.0.0.1:{port}/json/list").read()
+                        )
+                        pages = [t for t in targets if t.get("type") == "page"]
+                        if pages:
+                            page_cdp = CDPSession.connect_to_page(
+                                pages[0]["id"], port=port
+                            )
+                            page_cdp.send(
+                                "Browser.setDownloadBehavior",
+                                behavior="allow",
+                                downloadPath=dl_path,
+                            )
+                            page_cdp.close()
+                        browser_cdp.close()
+                    except Exception:
+                        pass  # Non-fatal — downloads still work, just default location
                 return proc
             except (URLError, OSError):
                 time.sleep(0.3)

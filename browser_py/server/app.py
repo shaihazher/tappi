@@ -36,6 +36,7 @@ def _get_agent() -> Agent:
             browser_profile=cfg.get("browser_profile"),
             on_tool_call=_on_tool_call,
             on_message=_on_message,
+            on_job_trigger=_on_job_change,
         )
         # Disable shell if configured
         if not cfg.get("shell_enabled", True):
@@ -225,58 +226,117 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 # ── Scheduler ──
 
 
-def _start_scheduler() -> None:
-    """Start APScheduler for cron jobs."""
+_scheduler = None
+
+
+def _add_job_to_scheduler(job: dict) -> None:
+    """Add a single job to the running scheduler."""
+    if _scheduler is None:
+        return
+
     try:
-        from apscheduler.schedulers.background import BackgroundScheduler
         from apscheduler.triggers.cron import CronTrigger
         from apscheduler.triggers.interval import IntervalTrigger
         from apscheduler.triggers.date import DateTrigger
+    except ImportError:
+        return
+
+    jid = job.get("id", "")
+    task_text = job.get("task", "")
+
+    # Remove existing job if it exists (for updates)
+    try:
+        _scheduler.remove_job(jid)
+    except Exception:
+        pass
+
+    if job.get("paused"):
+        return
+
+    if job.get("schedule_type") == "cron":
+        parts = job.get("cron", "").split()
+        if len(parts) == 5:
+            trigger = CronTrigger(
+                minute=parts[0],
+                hour=parts[1],
+                day=parts[2],
+                month=parts[3],
+                day_of_week=parts[4],
+                timezone=job.get("timezone") or None,
+            )
+            _scheduler.add_job(
+                _run_scheduled_task, trigger, args=[task_text], id=jid
+            )
+    elif job.get("schedule_type") == "interval":
+        minutes = job.get("interval_minutes", 60)
+        _scheduler.add_job(
+            _run_scheduled_task,
+            IntervalTrigger(minutes=minutes),
+            args=[task_text],
+            id=jid,
+        )
+    elif job.get("schedule_type") == "date":
+        _scheduler.add_job(
+            _run_scheduled_task,
+            DateTrigger(run_date=job["run_at"]),
+            args=[task_text],
+            id=jid,
+        )
+
+
+def _on_job_change(action: str, job: dict) -> None:
+    """Handle live cron job changes from the agent tool."""
+    if _scheduler is None:
+        return
+
+    jid = job.get("id", "")
+
+    if action == "remove":
+        try:
+            _scheduler.remove_job(jid)
+        except Exception:
+            pass
+    elif action == "pause":
+        try:
+            _scheduler.pause_job(jid)
+        except Exception:
+            pass
+    elif action == "resume":
+        try:
+            _scheduler.resume_job(jid)
+        except Exception:
+            pass
+    elif action == "run_now":
+        # Execute immediately in a thread
+        task_text = job.get("task", "")
+        if task_text:
+            import threading
+            threading.Thread(
+                target=_run_scheduled_task, args=[task_text], daemon=True
+            ).start()
+    elif action == "add":
+        _add_job_to_scheduler(job)
+
+
+def _start_scheduler() -> None:
+    """Start APScheduler for cron jobs."""
+    global _scheduler
+
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
     except ImportError:
         return  # APScheduler not installed — cron disabled
 
     from browser_py.agent.tools.cron import _load_jobs
 
-    scheduler = BackgroundScheduler()
+    _scheduler = BackgroundScheduler()
     jobs = _load_jobs()
 
     for jid, job in jobs.items():
-        if job.get("paused"):
-            continue
+        job["id"] = jid  # ensure id is set
+        _add_job_to_scheduler(job)
 
-        task_text = job.get("task", "")
-
-        if job.get("schedule_type") == "cron":
-            parts = job["cron"].split()
-            if len(parts) == 5:
-                trigger = CronTrigger(
-                    minute=parts[0],
-                    hour=parts[1],
-                    day=parts[2],
-                    month=parts[3],
-                    day_of_week=parts[4],
-                    timezone=job.get("timezone") or None,
-                )
-                scheduler.add_job(
-                    _run_scheduled_task, trigger, args=[task_text], id=jid
-                )
-        elif job.get("schedule_type") == "interval":
-            minutes = job.get("interval_minutes", 60)
-            scheduler.add_job(
-                _run_scheduled_task,
-                IntervalTrigger(minutes=minutes),
-                args=[task_text],
-                id=jid,
-            )
-        elif job.get("schedule_type") == "date":
-            scheduler.add_job(
-                _run_scheduled_task,
-                DateTrigger(run_date=job["run_at"]),
-                args=[task_text],
-                id=jid,
-            )
-
-    scheduler.start()
+    _scheduler.start()
 
 
 def _run_scheduled_task(task: str) -> None:

@@ -1,23 +1,23 @@
 # browser-py
 
-Lightweight Python library and CLI to control Chrome/Chromium via [CDP](https://chromedevtools.github.io/devtools-protocol/) (Chrome DevTools Protocol) — with an **AI agent** that can browse the web, manage files, create PDFs, and automate recurring tasks.
+**Your own AI agent that controls a real browser and manages files — running entirely on your machine.**
 
-**The killer feature:** connects to your **existing browser sessions** — all your logins, cookies, and extensions carry over. Log in once, automate forever.
+Give it a task in plain English. It opens your browser, navigates pages, clicks buttons, fills forms, reads content, creates PDFs, updates spreadsheets, and schedules recurring jobs. All your logins and cookies carry over. Everything stays local — your data never leaves your machine.
+
+Think of it as a personal automation assistant with two superpowers: **browser control** and **file management**, sandboxed to one directory. Secure enough for work. Powerful enough to replace most browser automation scripts you've ever written.
+
+### Why browser-py?
+
+- **10x more token-efficient** than screenshot-based agents (Operator, Computer Use). Instead of sending full screenshots, browser-py indexes interactive elements into a compact numbered list — the LLM says `click 3` instead of parsing pixel coordinates from a 1MB image.
+- **Better LLM decisions.** Numbered elements with semantic labels (`[3] (button) Submit Order`) give the model structured, unambiguous choices. No hallucinated CSS selectors. No coordinate guessing.
+- **Real browser, real sessions.** Connects to Chrome via CDP — your saved logins, cookies, and extensions are all there. Log in once, automate forever.
+- **Sandboxed by design.** One workspace directory. One browser. No filesystem access beyond the sandbox. Safe for corporate environments where you can't install full automation platforms.
+- **Works everywhere.** Linux, macOS, Windows. Python 3.10+. Single `pip install`.
 
 ```bash
 pip install browser-py            # CDP library only
 pip install browser-py[agent]     # CDP + AI agent + all tools
 ```
-
----
-
-## What's New in v0.2
-
-- 🤖 **AI Agent** — chat with an LLM that controls your browser
-- 🌐 **Web UI** — `bpy serve` for a local chat interface with settings
-- 📄 **PDF/Spreadsheet tools** — read and create PDFs, CSV, Excel
-- ⏰ **Cron jobs** — schedule recurring browser automation tasks
-- 🔧 **6 built-in tools** — browser, files, PDF, spreadsheet, shell, cron
 
 ---
 

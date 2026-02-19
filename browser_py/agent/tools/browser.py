@@ -78,9 +78,10 @@ TOOL_SCHEMA = {
 class BrowserTool:
     """Stateful browser tool that maintains a connection."""
 
-    def __init__(self, default_profile: str | None = None) -> None:
+    def __init__(self, default_profile: str | None = None, download_dir: str | None = None) -> None:
         self._browser: Browser | None = None
         self._default_profile = default_profile
+        self._download_dir = download_dir
 
     def _get_browser(self) -> Browser:
         """Get or create the browser connection."""
@@ -241,7 +242,7 @@ class BrowserTool:
         except BrowserNotRunning:
             pass
 
-        B.launch(port=port, user_data_dir=profile["path"])
+        B.launch(port=port, user_data_dir=profile["path"], download_dir=self._download_dir)
         self._browser = Browser(f"http://127.0.0.1:{port}")
         return f"Browser launched — profile: {profile['name']} (port {port})"
 

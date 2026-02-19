@@ -95,8 +95,9 @@ class Agent:
         self.on_tool_call = on_tool_call
         self.on_message = on_message
 
-        # Initialize tools
-        self._browser = BrowserTool(default_profile=browser_profile)
+        # Initialize tools — browser downloads go to workspace/downloads
+        downloads_dir = str(self.workspace / "downloads")
+        self._browser = BrowserTool(default_profile=browser_profile, download_dir=downloads_dir)
         self._files = FilesTool(workspace=self.workspace)
         self._pdf = PDFTool(workspace=self.workspace)
         self._spreadsheet = SpreadsheetTool(workspace=self.workspace)
