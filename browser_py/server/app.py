@@ -31,6 +31,8 @@ _ws_clients: list[WebSocket] = []
 def _get_agent() -> Agent:
     global _agent
     if _agent is None:
+        if not is_configured():
+            raise RuntimeError("Agent not configured. Complete setup first.")
         cfg = get_agent_config()
         _agent = Agent(
             browser_profile=cfg.get("browser_profile"),
@@ -38,7 +40,6 @@ def _get_agent() -> Agent:
             on_message=_on_message,
             on_job_trigger=_on_job_change,
         )
-        # Disable shell if configured
         if not cfg.get("shell_enabled", True):
             _agent._shell.enabled = False
     return _agent
@@ -95,9 +96,11 @@ async def chat(body: dict) -> JSONResponse:
     if not message:
         return JSONResponse({"error": "message required"}, status_code=400)
 
-    agent = _get_agent()
+    try:
+        agent = _get_agent()
+    except RuntimeError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
 
-    # Run in thread to avoid blocking
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(None, agent.chat, message)
 
@@ -233,12 +236,11 @@ async def profile_status() -> JSONResponse:
 
 @app.post("/api/config")
 async def update_config(body: dict) -> JSONResponse:
-    """Update agent configuration."""
+    """Update agent configuration (partial — settings page)."""
     from browser_py.agent.config import load_config, save_config
     config = load_config()
     agent_cfg = config.get("agent", {})
 
-    # Only allow updating safe fields
     allowed = {"model", "shell_enabled", "browser_profile"}
     for key in allowed:
         if key in body:
@@ -247,6 +249,121 @@ async def update_config(body: dict) -> JSONResponse:
     config["agent"] = agent_cfg
     save_config(config)
     return JSONResponse({"ok": True})
+
+
+@app.get("/api/providers")
+async def list_providers() -> JSONResponse:
+    """List available providers with model suggestions."""
+    from browser_py.agent.config import PROVIDERS
+    result = {}
+    for key, info in PROVIDERS.items():
+        result[key] = {
+            "name": info["name"],
+            "default_model": info["default_model"],
+            "note": info.get("note", ""),
+            "is_oauth": info.get("is_oauth", False),
+        }
+    # Add suggested models per provider
+    result["openrouter"]["models"] = [
+        "anthropic/claude-sonnet-4-20250514",
+        "anthropic/claude-opus-4-20250514",
+        "anthropic/claude-haiku-4-5-20251212",
+        "openai/gpt-4o",
+        "openai/o3-mini",
+        "google/gemini-2.0-flash-001",
+        "deepseek/deepseek-chat",
+    ]
+    result["anthropic"]["models"] = [
+        "claude-sonnet-4-20250514",
+        "claude-opus-4-20250514",
+        "claude-haiku-4-5-20251212",
+    ]
+    result["claude_max"]["models"] = [
+        "claude-sonnet-4-20250514",
+        "claude-opus-4-20250514",
+        "claude-haiku-4-5-20251212",
+    ]
+    result["openai"]["models"] = [
+        "gpt-4o",
+        "gpt-4o-mini",
+        "o3-mini",
+        "gpt-4-turbo",
+    ]
+    result["bedrock"]["models"] = [
+        "bedrock/anthropic.claude-sonnet-4-20250514-v1:0",
+        "bedrock/anthropic.claude-haiku-4-5-20251212-v1:0",
+    ]
+    result["azure"]["models"] = [
+        "azure/gpt-4o",
+        "azure/gpt-4-turbo",
+    ]
+    result["vertex"]["models"] = [
+        "vertex_ai/gemini-2.0-flash",
+        "vertex_ai/gemini-2.0-pro",
+    ]
+    return JSONResponse(result)
+
+
+@app.post("/api/setup")
+async def run_setup(body: dict) -> JSONResponse:
+    """Full setup — provider, key, model, workspace, browser, shell."""
+    from browser_py.agent.config import load_config, save_config
+    from browser_py.profiles import get_profile, create_profile
+
+    config = load_config()
+    agent_cfg = config.get("agent", {})
+
+    provider = body.get("provider")
+    api_key = body.get("api_key")
+    model = body.get("model")
+    workspace = body.get("workspace")
+    browser_profile = body.get("browser_profile")
+    shell_enabled = body.get("shell_enabled", True)
+
+    if not provider:
+        return JSONResponse({"error": "provider required"}, status_code=400)
+
+    agent_cfg["provider"] = provider
+
+    # Store API key
+    if api_key:
+        providers_cfg = agent_cfg.get("providers", {})
+        providers_cfg.setdefault(provider, {})["api_key"] = api_key
+        agent_cfg["providers"] = providers_cfg
+
+    # Azure extra fields
+    if provider == "azure":
+        if body.get("azure_endpoint"):
+            agent_cfg.setdefault("providers", {}).setdefault("azure", {})["base_url"] = body["azure_endpoint"]
+        if body.get("azure_api_version"):
+            agent_cfg.setdefault("providers", {}).setdefault("azure", {})["api_version"] = body["azure_api_version"]
+
+    if model:
+        agent_cfg["model"] = model
+    if workspace:
+        from pathlib import Path
+        ws = Path(workspace).expanduser().resolve()
+        ws.mkdir(parents=True, exist_ok=True)
+        agent_cfg["workspace"] = str(ws)
+
+    agent_cfg["shell_enabled"] = shell_enabled
+
+    # Browser profile — create if needed
+    if browser_profile:
+        try:
+            get_profile(browser_profile)
+        except ValueError:
+            create_profile(browser_profile)
+        agent_cfg["browser_profile"] = browser_profile
+
+    config["agent"] = agent_cfg
+    save_config(config)
+
+    # Reset the global agent so it picks up new config
+    global _agent
+    _agent = None
+
+    return JSONResponse({"ok": True, "configured": True})
 
 
 # ── WebSocket for live updates ──
@@ -262,11 +379,17 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             msg = json.loads(data)
 
             if msg.get("type") == "chat":
-                agent = _get_agent()
-                # Send thinking indicator
+                try:
+                    agent = _get_agent()
+                except RuntimeError as e:
+                    await ws.send_text(json.dumps({
+                        "type": "response",
+                        "content": f"⚠️ {e}\nPlease complete setup in the Settings page.",
+                    }))
+                    continue
+
                 await ws.send_text(json.dumps({"type": "thinking"}))
 
-                # Run agent in thread
                 loop = asyncio.get_event_loop()
                 result = await loop.run_in_executor(
                     None, agent.chat, msg.get("message", "")
@@ -568,8 +691,92 @@ _FALLBACK_HTML = """\
 </div>
 
 <div id="main">
+  <!-- Setup Page (shown when not configured) -->
+  <div class="page" id="page-setup">
+    <header><h2>🔧 Setup</h2></header>
+    <div class="page-content">
+      <div class="card">
+        <h3>Welcome to browser-py</h3>
+        <p>Let's configure your AI agent. This takes about 30 seconds.</p>
+      </div>
+
+      <div class="card">
+        <h3>1. LLM Provider</h3>
+        <div class="field">
+          <label>Provider</label>
+          <select id="setup-provider" onchange="onProviderChange()">
+            <option value="">— Select —</option>
+          </select>
+        </div>
+        <div id="setup-provider-note" style="font-size:12px;color:var(--text-dim);margin-bottom:12px;display:none"></div>
+        <div class="field" id="setup-key-field">
+          <label id="setup-key-label">API Key</label>
+          <input type="password" id="setup-key" placeholder="sk-..." autocomplete="off">
+          <p id="setup-key-hint" style="font-size:11px;color:var(--text-dim);margin-top:4px"></p>
+        </div>
+        <div id="setup-azure-fields" style="display:none">
+          <div class="field">
+            <label>Azure Endpoint URL</label>
+            <input type="text" id="setup-azure-endpoint" placeholder="https://your-resource.openai.azure.com">
+          </div>
+          <div class="field">
+            <label>API Version</label>
+            <input type="text" id="setup-azure-version" value="2024-02-01">
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>2. Model</h3>
+        <div class="field">
+          <label>Model</label>
+          <select id="setup-model"></select>
+        </div>
+        <div class="field">
+          <label>Or type a custom model name</label>
+          <input type="text" id="setup-model-custom" placeholder="Leave empty to use selection above">
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>3. Workspace Directory</h3>
+        <p>All file operations are sandboxed to this directory.</p>
+        <div class="field">
+          <label>Path</label>
+          <input type="text" id="setup-workspace" placeholder="~/browser-py-workspace">
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>4. Browser Profile</h3>
+        <p>The browser profile the agent uses. Each profile keeps its own logins and cookies.</p>
+        <div class="field">
+          <label>Profile</label>
+          <select id="setup-browser-profile"></select>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+          <input type="text" id="setup-new-profile" placeholder="New profile name" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:13px;flex:1">
+          <button class="btn secondary" onclick="setupCreateProfile()" style="white-space:nowrap">Create</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>5. Permissions</h3>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="setup-shell" style="width:auto" checked>
+          <label for="setup-shell" style="margin:0;text-transform:none">Allow shell commands</label>
+        </div>
+      </div>
+
+      <button class="btn" onclick="submitSetup()" style="width:100%;padding:12px;font-size:15px" id="setup-submit">
+        Save &amp; Start
+      </button>
+      <div id="setup-error" style="color:var(--danger);font-size:13px;margin-top:8px;display:none"></div>
+    </div>
+  </div>
+
   <!-- Chat Page -->
-  <div class="page active" id="page-chat">
+  <div class="page" id="page-chat">
     <header>
       <h2>Chat</h2>
       <button class="btn secondary" onclick="resetChat()" style="margin-left:auto">New Chat</button>
@@ -626,19 +833,36 @@ _FALLBACK_HTML = """\
         <h3>LLM Provider</h3>
         <div class="field">
           <label>Provider</label>
-          <input type="text" id="cfg-provider" disabled>
+          <select id="cfg-provider" onchange="onCfgProviderChange()"></select>
+        </div>
+        <div class="field" id="cfg-key-field">
+          <label id="cfg-key-label">API Key</label>
+          <input type="password" id="cfg-key" placeholder="Enter new key to change (leave empty to keep current)" autocomplete="off">
+        </div>
+        <div id="cfg-azure-fields" style="display:none">
+          <div class="field">
+            <label>Azure Endpoint URL</label>
+            <input type="text" id="cfg-azure-endpoint">
+          </div>
+          <div class="field">
+            <label>API Version</label>
+            <input type="text" id="cfg-azure-version">
+          </div>
         </div>
         <div class="field">
           <label>Model</label>
-          <input type="text" id="cfg-model">
+          <select id="cfg-model-select" onchange="document.getElementById('cfg-model').value=this.value"></select>
         </div>
-        <p style="font-size:11px">Change provider or API key via CLI: <code>bpy setup</code></p>
+        <div class="field">
+          <label>Custom model (overrides dropdown)</label>
+          <input type="text" id="cfg-model" placeholder="Leave empty to use dropdown">
+        </div>
       </div>
       <div class="card">
         <h3>Workspace</h3>
         <div class="field">
           <label>Directory</label>
-          <input type="text" id="cfg-workspace" disabled>
+          <input type="text" id="cfg-workspace">
         </div>
       </div>
       <div class="card">
@@ -652,7 +876,8 @@ _FALLBACK_HTML = """\
           <select id="cfg-profile"></select>
         </div>
       </div>
-      <button class="btn" onclick="saveSettings()">Save Settings</button>
+      <button class="btn" onclick="saveSettings()" style="width:100%;padding:10px">Save Settings</button>
+      <div id="cfg-saved" style="color:var(--success);font-size:13px;margin-top:8px;display:none">✓ Saved</div>
     </div>
   </div>
 </div>
@@ -662,17 +887,209 @@ const chatEl = document.getElementById('chat-messages');
 const input = document.getElementById('input');
 const sendBtn = document.getElementById('send');
 const status = document.getElementById('status');
-let ws;
+let ws, providers = {};
+
+// ── Init ──
+async function init() {
+  // Load providers
+  const pres = await fetch('/api/providers');
+  providers = await pres.json();
+
+  // Check if configured
+  const cres = await fetch('/api/config');
+  const cfg = await cres.json();
+
+  if (!cfg.configured) {
+    await initSetupPage(cfg);
+    showPage('setup');
+  } else {
+    connect();
+    loadVersionInfo(cfg);
+  }
+}
+
+function loadVersionInfo(cfg) {
+  document.getElementById('version-info').textContent =
+    `${providers[cfg.provider]?.name || cfg.provider} · ${cfg.model?.split('/').pop() || ''}`;
+}
 
 // ── Navigation ──
 function showPage(name) {
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('#sidebar nav a').forEach(a => a.classList.remove('active'));
   document.getElementById('page-' + name).classList.add('active');
-  document.querySelector(`[data-page="${name}"]`).classList.add('active');
+  const navEl = document.querySelector(`[data-page="${name}"]`);
+  if (navEl) navEl.classList.add('active');
   if (name === 'profiles') loadProfiles();
   if (name === 'jobs') loadJobs();
-  if (name === 'settings') loadSettings();
+  if (name === 'settings') loadSettingsPage();
+  if (name === 'setup') initSetupPage();
+}
+
+// ── Setup Page ──
+async function initSetupPage(cfg) {
+  const sel = document.getElementById('setup-provider');
+  sel.innerHTML = '<option value="">— Select —</option>' +
+    Object.entries(providers).map(([k,v]) => {
+      const tag = v.is_oauth ? ' ⭐ no API cost' : '';
+      return `<option value="${k}">${v.name}${tag}</option>`;
+    }).join('');
+
+  // Default workspace
+  const wsInput = document.getElementById('setup-workspace');
+  if (!wsInput.value) {
+    wsInput.value = cfg?.workspace || '~/browser-py-workspace';
+  }
+
+  // Load existing profiles into dropdown
+  await loadSetupProfiles();
+
+  // If already configured, pre-fill
+  if (cfg?.provider) {
+    sel.value = cfg.provider;
+    onProviderChange();
+    if (cfg.model) {
+      const custom = document.getElementById('setup-model-custom');
+      const msel = document.getElementById('setup-model');
+      if ([...msel.options].some(o => o.value === cfg.model)) {
+        msel.value = cfg.model;
+      } else {
+        custom.value = cfg.model;
+      }
+    }
+  }
+}
+
+async function loadSetupProfiles() {
+  const res = await fetch('/api/profiles');
+  const data = await res.json();
+  const sel = document.getElementById('setup-browser-profile');
+  const profiles = data.profiles || [];
+  if (!profiles.length) {
+    sel.innerHTML = '<option value="default">default (will be created)</option>';
+  } else {
+    sel.innerHTML = profiles.map(p =>
+      `<option value="${p.name}">${p.name} (port ${p.port})</option>`
+    ).join('');
+  }
+}
+
+function onProviderChange() {
+  const p = document.getElementById('setup-provider').value;
+  const info = providers[p] || {};
+  const models = info.models || [];
+
+  // Model dropdown
+  const msel = document.getElementById('setup-model');
+  msel.innerHTML = models.map(m => `<option value="${m}">${m}</option>`).join('');
+  if (info.default_model && models.includes(info.default_model)) {
+    msel.value = info.default_model;
+  }
+
+  // Key label & hint
+  const keyLabel = document.getElementById('setup-key-label');
+  const keyInput = document.getElementById('setup-key');
+  const keyHint = document.getElementById('setup-key-hint');
+  const keyField = document.getElementById('setup-key-field');
+  const note = document.getElementById('setup-provider-note');
+  const azureFields = document.getElementById('setup-azure-fields');
+
+  azureFields.style.display = p === 'azure' ? 'block' : 'none';
+
+  if (info.is_oauth) {
+    keyLabel.textContent = 'OAuth Token';
+    keyInput.placeholder = 'sk-ant-oat01-...';
+    keyHint.textContent = 'From your Claude Max/Pro subscription. Same token Claude Code uses.';
+    keyField.style.display = '';
+  } else if (p === 'bedrock' || p === 'vertex') {
+    keyField.style.display = 'none';
+    note.style.display = 'block';
+    note.textContent = info.note;
+    return;
+  } else {
+    keyLabel.textContent = 'API Key';
+    keyInput.placeholder = 'sk-...';
+    keyHint.textContent = '';
+    keyField.style.display = '';
+  }
+  note.style.display = info.note && p !== 'bedrock' && p !== 'vertex' ? 'block' : 'none';
+  note.textContent = info.note || '';
+}
+
+async function setupCreateProfile() {
+  const nameInput = document.getElementById('setup-new-profile');
+  const name = nameInput.value.trim();
+  if (!name) return;
+  const res = await fetch('/api/profiles', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ name })
+  });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  nameInput.value = '';
+  await loadSetupProfiles();
+  document.getElementById('setup-browser-profile').value = name;
+}
+
+async function submitSetup() {
+  const btn = document.getElementById('setup-submit');
+  const errEl = document.getElementById('setup-error');
+  errEl.style.display = 'none';
+
+  const provider = document.getElementById('setup-provider').value;
+  if (!provider) { errEl.textContent = 'Please select a provider.'; errEl.style.display = 'block'; return; }
+
+  const api_key = document.getElementById('setup-key')?.value || '';
+  const modelCustom = document.getElementById('setup-model-custom').value.trim();
+  const modelSelect = document.getElementById('setup-model').value;
+  const model = modelCustom || modelSelect;
+  const workspace = document.getElementById('setup-workspace').value.trim() || '~/browser-py-workspace';
+  const browser_profile = document.getElementById('setup-browser-profile').value || 'default';
+  const shell_enabled = document.getElementById('setup-shell').checked;
+
+  if (!api_key && provider !== 'bedrock' && provider !== 'vertex') {
+    errEl.textContent = 'API key is required.';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Saving...';
+
+  const body = { provider, model, workspace, browser_profile, shell_enabled };
+  if (api_key) body.api_key = api_key;
+  if (provider === 'azure') {
+    body.azure_endpoint = document.getElementById('setup-azure-endpoint')?.value || '';
+    body.azure_api_version = document.getElementById('setup-azure-version')?.value || '';
+  }
+
+  try {
+    const res = await fetch('/api/setup', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (data.error) {
+      errEl.textContent = data.error;
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Save & Start';
+      return;
+    }
+
+    // Success — go to chat
+    connect();
+    const cres = await fetch('/api/config');
+    const cfg = await cres.json();
+    loadVersionInfo(cfg);
+    showPage('chat');
+    addMsg('Setup complete! How can I help?', 'agent');
+  } catch(e) {
+    errEl.textContent = 'Setup failed: ' + e;
+    errEl.style.display = 'block';
+  }
+  btn.disabled = false;
+  btn.textContent = 'Save & Start';
 }
 
 // ── WebSocket ──
@@ -789,7 +1206,6 @@ async function createProfile() {
   if (data.error) { alert(data.error); return; }
   document.getElementById('new-profile-name').value = '';
   loadProfiles();
-  loadSettings(); // refresh profile dropdown
 }
 
 // ── Jobs ──
@@ -810,41 +1226,98 @@ async function loadJobs() {
   }).join('');
 }
 
-// ── Settings ──
-async function loadSettings() {
-  const res = await fetch('/api/config');
-  const cfg = await res.json();
-  document.getElementById('cfg-provider').value = cfg.provider || '';
-  document.getElementById('cfg-model').value = cfg.model || '';
-  document.getElementById('cfg-workspace').value = cfg.workspace || '';
-  document.getElementById('cfg-shell').checked = cfg.shell_enabled !== false;
-  document.getElementById('version-info').textContent = `${cfg.provider} · ${cfg.model?.split('/').pop() || ''}`;
+// ── Settings Page ──
+async function loadSettingsPage() {
+  const cres = await fetch('/api/config');
+  const cfg = await cres.json();
 
-  // Load profiles for dropdown
+  // Provider dropdown
+  const provSel = document.getElementById('cfg-provider');
+  provSel.innerHTML = Object.entries(providers).map(([k,v]) =>
+    `<option value="${k}" ${k === cfg.provider ? 'selected' : ''}>${v.name}</option>`
+  ).join('');
+  onCfgProviderChange();
+
+  // Model
+  const msel = document.getElementById('cfg-model-select');
+  const info = providers[cfg.provider] || {};
+  const models = info.models || [];
+  msel.innerHTML = models.map(m =>
+    `<option value="${m}" ${m === cfg.model ? 'selected' : ''}>${m}</option>`
+  ).join('');
+  document.getElementById('cfg-model').value =
+    models.includes(cfg.model) ? '' : (cfg.model || '');
+
+  // Workspace
+  document.getElementById('cfg-workspace').value = cfg.workspace || '';
+
+  // Shell
+  document.getElementById('cfg-shell').checked = cfg.shell_enabled !== false;
+
+  // Profiles dropdown
   const pres = await fetch('/api/profiles');
   const pdata = await pres.json();
-  const sel = document.getElementById('cfg-profile');
-  sel.innerHTML = (pdata.profiles || []).map(p =>
+  const psel = document.getElementById('cfg-profile');
+  psel.innerHTML = (pdata.profiles || []).map(p =>
     `<option value="${p.name}" ${p.name === cfg.browser_profile ? 'selected' : ''}>${p.name} (port ${p.port})</option>`
   ).join('');
+
+  document.getElementById('cfg-azure-fields').style.display =
+    cfg.provider === 'azure' ? 'block' : 'none';
+}
+
+function onCfgProviderChange() {
+  const p = document.getElementById('cfg-provider').value;
+  const info = providers[p] || {};
+
+  // Update model dropdown
+  const msel = document.getElementById('cfg-model-select');
+  const models = info.models || [];
+  msel.innerHTML = models.map(m => `<option value="${m}">${m}</option>`).join('');
+  if (info.default_model) msel.value = info.default_model;
+
+  // Key field label
+  const keyLabel = document.getElementById('cfg-key-label');
+  if (info.is_oauth) keyLabel.textContent = 'OAuth Token';
+  else keyLabel.textContent = 'API Key';
+
+  const keyField = document.getElementById('cfg-key-field');
+  keyField.style.display = (p === 'bedrock' || p === 'vertex') ? 'none' : '';
+
+  document.getElementById('cfg-azure-fields').style.display = p === 'azure' ? 'block' : 'none';
 }
 
 async function saveSettings() {
-  const body = {
-    model: document.getElementById('cfg-model').value,
-    shell_enabled: document.getElementById('cfg-shell').checked,
-    browser_profile: document.getElementById('cfg-profile').value,
-  };
-  await fetch('/api/config', {
+  const provider = document.getElementById('cfg-provider').value;
+  const api_key = document.getElementById('cfg-key').value.trim();
+  const modelCustom = document.getElementById('cfg-model').value.trim();
+  const modelSelect = document.getElementById('cfg-model-select').value;
+  const model = modelCustom || modelSelect;
+  const workspace = document.getElementById('cfg-workspace').value.trim();
+  const shell_enabled = document.getElementById('cfg-shell').checked;
+  const browser_profile = document.getElementById('cfg-profile').value;
+
+  const body = { provider, model, workspace, browser_profile, shell_enabled };
+  if (api_key) body.api_key = api_key;
+  if (provider === 'azure') {
+    body.azure_endpoint = document.getElementById('cfg-azure-endpoint')?.value || '';
+    body.azure_api_version = document.getElementById('cfg-azure-version')?.value || '';
+  }
+
+  await fetch('/api/setup', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body)
   });
-  loadSettings();
-  alert('Settings saved. Restart the server for provider/model changes to take effect.');
+
+  const savedEl = document.getElementById('cfg-saved');
+  savedEl.style.display = 'block';
+  setTimeout(() => savedEl.style.display = 'none', 3000);
+
+  const cres = await fetch('/api/config');
+  loadVersionInfo(await cres.json());
 }
 
-connect();
-loadSettings();
+init();
 </script>
 </body>
 </html>

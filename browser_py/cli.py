@@ -716,14 +716,7 @@ def run_agent(args: list[str]) -> None:
 
 def run_serve(args: list[str]) -> None:
     """Start the web UI server."""
-    from browser_py.agent.config import is_configured
-
-    if not is_configured():
-        print(_yellow("Agent not configured. Running setup first...\n"))
-        from browser_py.agent.setup import run_setup
-        run_setup()
-        return
-
+    # Don't require CLI setup — the web UI has its own setup flow
     host = "127.0.0.1"
     port = 8321
 
