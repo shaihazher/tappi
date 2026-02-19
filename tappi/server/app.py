@@ -17,10 +17,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from browser_py.agent.config import get_agent_config, get_workspace, is_configured
-from browser_py.agent.loop import Agent
+from tappi.agent.config import get_agent_config, get_workspace, is_configured
+from tappi.agent.loop import Agent
 
-app = FastAPI(title="browser-py", docs_url=None, redoc_url=None)
+app = FastAPI(title="tappi", docs_url=None, redoc_url=None)
 
 # Global agent instance (per server process)
 _agent: Agent | None = None
@@ -152,7 +152,7 @@ async def history() -> JSONResponse:
 @app.get("/api/config")
 async def config() -> JSONResponse:
     """Get agent configuration (secrets masked, never raw)."""
-    from browser_py.agent.config import get_provider_credentials_status
+    from tappi.agent.config import get_provider_credentials_status
     cfg = get_agent_config()
     providers_cfg = cfg.get("providers", {})
 
@@ -171,7 +171,7 @@ async def config() -> JSONResponse:
     }
 
     # Include non-secret provider fields (base_url, api_version, region, etc.)
-    from browser_py.agent.config import PROVIDERS
+    from tappi.agent.config import PROVIDERS
     provider_fields = {}
     for pkey, pinfo in PROVIDERS.items():
         fields = pinfo.get("fields", [])
@@ -194,7 +194,7 @@ async def config() -> JSONResponse:
 @app.get("/api/sessions")
 async def list_sessions_api() -> JSONResponse:
     """List saved chat sessions."""
-    from browser_py.agent.sessions import list_sessions
+    from tappi.agent.sessions import list_sessions
     return JSONResponse({"sessions": list_sessions()})
 
 
@@ -235,7 +235,7 @@ async def load_session_api(body: dict) -> JSONResponse:
 @app.delete("/api/sessions/{session_id}")
 async def delete_session_api(session_id: str) -> JSONResponse:
     """Delete a saved session."""
-    from browser_py.agent.sessions import delete_session
+    from tappi.agent.sessions import delete_session
     if delete_session(session_id):
         return JSONResponse({"ok": True})
     return JSONResponse({"error": "Session not found"}, status_code=404)
@@ -244,7 +244,7 @@ async def delete_session_api(session_id: str) -> JSONResponse:
 @app.get("/api/sessions/{session_id}/export")
 async def export_session_api(session_id: str) -> JSONResponse:
     """Export a session as markdown."""
-    from browser_py.agent.sessions import export_session_markdown
+    from tappi.agent.sessions import export_session_markdown
     md = export_session_markdown(session_id)
     if md:
         return JSONResponse({"markdown": md})
@@ -349,7 +349,7 @@ async def start_research(body: dict) -> JSONResponse:
         _research_agents.append(agent)
 
     def _run() -> None:
-        from browser_py.agent.research import run_research
+        from tappi.agent.research import run_research
         try:
             result = run_research(
                 query=query,
@@ -400,7 +400,7 @@ async def validate_key(body: dict) -> JSONResponse:
 
     def _validate() -> dict:
         try:
-            from browser_py.agent.models import fetch_models
+            from tappi.agent.models import fetch_models
             models = fetch_models(provider, api_key=api_key)
             if models:
                 return {"valid": True, "model_count": len(models)}
@@ -415,7 +415,7 @@ async def validate_key(body: dict) -> JSONResponse:
 @app.get("/api/jobs")
 async def list_jobs() -> JSONResponse:
     """List cron jobs."""
-    from browser_py.agent.tools.cron import _load_jobs
+    from tappi.agent.tools.cron import _load_jobs
     jobs = _load_jobs()
     return JSONResponse({"jobs": jobs})
 
@@ -470,7 +470,7 @@ async def probe_job_run(run_id: str) -> JSONResponse:
 @app.post("/api/jobs/trigger")
 async def trigger_job(body: dict) -> JSONResponse:
     """Trigger a job to run immediately. Returns the run_id for live tracking."""
-    from browser_py.agent.tools.cron import _load_jobs
+    from tappi.agent.tools.cron import _load_jobs
     job_id = body.get("job_id", "")
     if not job_id:
         return JSONResponse({"error": "job_id required"}, status_code=400)
@@ -509,7 +509,7 @@ async def trigger_job(body: dict) -> JSONResponse:
 @app.get("/api/profiles")
 async def list_browser_profiles() -> JSONResponse:
     """List browser profiles."""
-    from browser_py.profiles import list_profiles
+    from tappi.profiles import list_profiles
     profiles = list_profiles()
     return JSONResponse({"profiles": profiles})
 
@@ -517,7 +517,7 @@ async def list_browser_profiles() -> JSONResponse:
 @app.post("/api/profiles")
 async def create_browser_profile(body: dict) -> JSONResponse:
     """Create a new browser profile."""
-    from browser_py.profiles import create_profile
+    from tappi.profiles import create_profile
     name = body.get("name", "")
     if not name:
         return JSONResponse({"error": "name required"}, status_code=400)
@@ -534,8 +534,8 @@ async def launch_browser_profile(body: dict) -> JSONResponse:
     import json as _json
     from urllib.request import urlopen
     from urllib.error import URLError
-    from browser_py.profiles import get_profile
-    from browser_py.core import Browser
+    from tappi.profiles import get_profile
+    from tappi.core import Browser
 
     name = body.get("name")
     try:
@@ -579,7 +579,7 @@ async def profile_status() -> JSONResponse:
     import json as _json
     from urllib.request import urlopen
     from urllib.error import URLError
-    from browser_py.profiles import list_profiles
+    from tappi.profiles import list_profiles
 
     profiles = list_profiles()
     for p in profiles:
@@ -595,7 +595,7 @@ async def profile_status() -> JSONResponse:
 @app.post("/api/config")
 async def update_config(body: dict) -> JSONResponse:
     """Update agent configuration (partial — settings page)."""
-    from browser_py.agent.config import load_config, save_config
+    from tappi.agent.config import load_config, save_config
     config = load_config()
     agent_cfg = config.get("agent", {})
 
@@ -621,7 +621,7 @@ async def update_config(body: dict) -> JSONResponse:
 @app.get("/api/providers")
 async def list_providers() -> JSONResponse:
     """List available providers with metadata (no models — use /api/models)."""
-    from browser_py.agent.config import PROVIDERS
+    from tappi.agent.config import PROVIDERS
     result = {}
     for key, info in PROVIDERS.items():
         entry = {
@@ -649,7 +649,7 @@ async def get_models(
     - q: filter models by search string
     - tool_use_only: only return models that support tool use
     """
-    from browser_py.agent.models import fetch_models
+    from tappi.agent.models import fetch_models
     import asyncio
 
     # Gather extra credentials from config for Bedrock etc.
@@ -699,8 +699,8 @@ async def browse_dirs(path: str = "~") -> JSONResponse:
 @app.post("/api/setup")
 async def run_setup(body: dict) -> JSONResponse:
     """Full setup — provider, key, model, workspace, browser, shell."""
-    from browser_py.agent.config import load_config, save_config
-    from browser_py.profiles import get_profile, create_profile
+    from tappi.agent.config import load_config, save_config
+    from tappi.profiles import get_profile, create_profile
 
     config = load_config()
     agent_cfg = config.get("agent", {})
@@ -724,7 +724,7 @@ async def run_setup(body: dict) -> JSONResponse:
     agent_cfg["providers"] = providers_cfg
 
     # Store provider-specific fields (Bedrock, Azure, Vertex, etc.)
-    from browser_py.agent.config import PROVIDERS as PROVIDER_DEFS
+    from tappi.agent.config import PROVIDERS as PROVIDER_DEFS
     pinfo = PROVIDER_DEFS.get(provider, {})
     if pinfo.get("fields"):
         pcfg = providers_cfg.setdefault(provider, {})
@@ -970,7 +970,7 @@ def _start_scheduler() -> None:
     except ImportError:
         return  # APScheduler not installed — cron disabled
 
-    from browser_py.agent.tools.cron import _load_jobs
+    from tappi.agent.tools.cron import _load_jobs
 
     _scheduler = BackgroundScheduler()
     jobs = _load_jobs()
@@ -1098,7 +1098,7 @@ def start_server(host: str = "127.0.0.1", port: int = 8321) -> None:
     global _loop
     import uvicorn
 
-    print(f"\n🌐 browser-py agent running at http://{host}:{port}\n")
+    print(f"\n🌐 tappi agent running at http://{host}:{port}\n")
 
     _start_scheduler()
 
@@ -1117,7 +1117,7 @@ _FALLBACK_HTML = """\
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>browser-py</title>
+<title>tappi</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   :root {
@@ -1413,7 +1413,7 @@ _FALLBACK_HTML = """\
 <body>
 
 <div id="sidebar">
-  <div class="logo">🌐 browser-py</div>
+  <div class="logo">🌐 tappi</div>
   <nav>
     <a class="active" data-page="chat" onclick="showPage('chat')">💬 Chat</a>
     <a data-page="profiles" onclick="showPage('profiles')">🌍 Browser Profiles</a>
@@ -1432,7 +1432,7 @@ _FALLBACK_HTML = """\
       <span id="token-pct">0%</span>
     </div>
   </div>
-  <div class="version" id="version-info">browser-py</div>
+  <div class="version" id="version-info">tappi</div>
 </div>
 
 <div id="main">
@@ -1441,7 +1441,7 @@ _FALLBACK_HTML = """\
     <header><h2>🔧 Setup</h2></header>
     <div class="page-content">
       <div class="card">
-        <h3>Welcome to browser-py</h3>
+        <h3>Welcome to tappi</h3>
         <p>Let's configure your AI agent step by step.</p>
       </div>
 
@@ -1502,7 +1502,7 @@ _FALLBACK_HTML = """\
           <div class="field">
             <label>Path</label>
             <div class="folder-input-wrap">
-              <input type="text" id="setup-workspace" placeholder="~/browser-py-workspace">
+              <input type="text" id="setup-workspace" placeholder="~/tappi-workspace">
               <button class="btn" onclick="openFolderPicker('setup-workspace')">Browse</button>
             </div>
           </div>
@@ -2242,7 +2242,7 @@ async function initSetupPage(cfg) {
   }
 
   const wsInput = document.getElementById('setup-workspace');
-  if (!wsInput.value) wsInput.value = cfg?.workspace || '~/browser-py-workspace';
+  if (!wsInput.value) wsInput.value = cfg?.workspace || '~/tappi-workspace';
 
   await loadSetupProfiles();
 
@@ -2384,7 +2384,7 @@ async function submitSetup() {
   const info = providers[provider] || {};
   const modelCustom = document.getElementById('setup-model-custom').value.trim();
   const model = modelCustom || setupModelPicker.getValue();
-  const workspace = document.getElementById('setup-workspace').value.trim() || '~/browser-py-workspace';
+  const workspace = document.getElementById('setup-workspace').value.trim() || '~/tappi-workspace';
   const browser_profile = document.getElementById('setup-browser-profile').value || 'default';
   const shell_enabled = document.getElementById('setup-shell').checked;
 

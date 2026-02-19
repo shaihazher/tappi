@@ -3,7 +3,7 @@
 This is the main module. Use Browser for high-level control, CDPSession
 for raw CDP protocol access.
 
-    from browser_py import Browser
+    from tappi import Browser
 
     b = Browser("http://127.0.0.1:9222")
     b.open("https://example.com")
@@ -27,7 +27,7 @@ from typing import Any
 from urllib.request import urlopen
 from urllib.error import URLError
 
-from browser_py.js_expressions import (
+from tappi.js_expressions import (
     check_indexed_js,
     clear_contenteditable_js,
     clear_input_js,
@@ -93,7 +93,7 @@ class BrowserNotRunning(Exception):
             f"Make sure Chrome/Chromium is running with remote debugging enabled:\n"
             f"  chrome --remote-debugging-port={port}\n\n"
             f"Or start it with a persistent profile (keeps your logins):\n"
-            f"  chrome --remote-debugging-port={port} --user-data-dir=~/.browser-py-data"
+            f"  chrome --remote-debugging-port={port} --user-data-dir=~/.tappi-data"
         )
 
 
@@ -118,7 +118,7 @@ class CDPSession:
         """Connect to a specific page target by its ID."""
         if websockets is None:
             raise ImportError(
-                "websockets is required: pip install browser-py\n"
+                "websockets is required: pip install tappi\n"
                 "Or: pip install websockets"
             )
         ws_url = f"ws://127.0.0.1:{port}/devtools/page/{target_id}"
@@ -129,7 +129,7 @@ class CDPSession:
     def connect_to_browser(cls, cdp_url: str) -> CDPSession:
         """Connect to the browser-level CDP endpoint."""
         if websockets is None:
-            raise ImportError("websockets is required: pip install browser-py")
+            raise ImportError("websockets is required: pip install tappi")
         try:
             data = json.loads(urlopen(f"{cdp_url}/json/version").read())
         except (URLError, OSError):
@@ -706,7 +706,7 @@ class Browser:
         """Take a screenshot of the current page.
 
         Args:
-            path: File path to save to (default: /tmp/browser_py_screenshot_<timestamp>.png).
+            path: File path to save to (default: /tmp/tappi_screenshot_<timestamp>.png).
             format: Image format — "png" or "jpeg".
 
         Returns:
@@ -719,7 +719,7 @@ class Browser:
             result = cdp.send("Page.captureScreenshot", format=format)
             data = base64.b64decode(result.get("data", ""))
             ext = "jpg" if format == "jpeg" else format
-            out_path = path or f"/tmp/browser_py_screenshot_{int(time.time())}.{ext}"
+            out_path = path or f"/tmp/tappi_screenshot_{int(time.time())}.{ext}"
             Path(out_path).write_bytes(data)
             return out_path
         finally:
@@ -827,7 +827,7 @@ class Browser:
         Args:
             port: CDP port (default: 9222).
             user_data_dir: Where to store the browser profile. Default:
-                           ~/.browser-py/profile
+                           ~/.tappi/profile
             headless: Run without a visible window (default: False).
                       Set True for server/CI environments.
             chrome_path: Path to Chrome/Chromium binary. Auto-detected if
@@ -852,7 +852,7 @@ class Browser:
             )
 
         data_dir = user_data_dir or os.path.join(
-            Path.home(), ".browser-py", "profile"
+            Path.home(), ".tappi", "profile"
         )
         os.makedirs(data_dir, exist_ok=True)
 

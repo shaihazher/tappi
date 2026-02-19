@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from browser_py.agent.config import get_workspace
+from tappi.agent.config import get_workspace
 
 TOOL_SCHEMA = {
     "type": "function",

@@ -1,4 +1,4 @@
-# browser-py
+# tappi
 
 **Your own AI agent that controls a real browser and manages files — running entirely on your machine.**
 
@@ -6,17 +6,17 @@ Give it a task in plain English. It opens your browser, navigates pages, clicks 
 
 Think of it as a personal automation assistant with two superpowers: **browser control** and **file management**, sandboxed to one directory. Secure enough for work. Powerful enough to replace most browser automation scripts you've ever written.
 
-### Why browser-py?
+### Why tappi?
 
-- **10x more token-efficient** than screenshot-based agents (Operator, Computer Use). Instead of sending full screenshots, browser-py indexes interactive elements into a compact numbered list — the LLM says `click 3` instead of parsing pixel coordinates from a 1MB image.
+- **10x more token-efficient** than screenshot-based agents (Operator, Computer Use). Instead of sending full screenshots, tappi indexes interactive elements into a compact numbered list — the LLM says `click 3` instead of parsing pixel coordinates from a 1MB image.
 - **Better LLM decisions.** Numbered elements with semantic labels (`[3] (button) Submit Order`) give the model structured, unambiguous choices. No hallucinated CSS selectors. No coordinate guessing.
 - **Real browser, real sessions.** Connects to Chrome via CDP — your saved logins, cookies, and extensions are all there. Log in once, automate forever.
 - **Sandboxed by design.** One workspace directory. One browser. No filesystem access beyond the sandbox. Safe for corporate environments where you can't install full automation platforms.
 - **Works everywhere.** Linux, macOS, Windows. Python 3.10+. Single `pip install`.
 
 ```bash
-pip install browser-py            # CDP library only
-pip install browser-py[agent]     # CDP + AI agent + all tools
+pip install tappi            # CDP library only
+pip install tappi[agent]     # CDP + AI agent + all tools
 ```
 
 ---
@@ -41,7 +41,7 @@ pip install browser-py[agent]     # CDP + AI agent + all tools
 
 ```bash
 # Install with agent support
-pip install browser-py[agent]
+pip install tappi[agent]
 
 # One-time setup: choose provider, enter API key, set workspace
 bpy setup
@@ -77,7 +77,7 @@ The wizard walks you through:
 5. **Browser Profile** — which browser profile the agent uses
 6. **Shell Access** — toggle on/off
 
-All config lives in `~/.browser-py/config.json`.
+All config lives in `~/.tappi/config.json`.
 
 ### Providers
 
@@ -118,7 +118,7 @@ bpy agent
 ```
 
 ```
-browser-py agent (type 'quit' to exit, 'reset' to clear)
+tappi agent (type 'quit' to exit, 'reset' to clear)
 
 You: Go to hacker news and find the top post about AI
   🔧 browser → launch
@@ -188,7 +188,7 @@ You: Schedule a job to check trending repos on GitHub every morning at 9 AM
 Agent: Done. Created job "GitHub Trends" with schedule "0 9 * * *".
 ```
 
-Jobs are stored in `~/.browser-py/jobs.json` and persist across restarts. When `bpy serve` is running, APScheduler fires each job in its own agent session.
+Jobs are stored in `~/.tappi/jobs.json` and persist across restarts. When `bpy serve` is running, APScheduler fires each job in its own agent session.
 
 ```bash
 # Via CLI
@@ -241,7 +241,7 @@ bpy launch
 
 ```
 ✓ Chrome launched on port 9222
-  Profile: ~/.browser-py/profiles/default
+  Profile: ~/.tappi/profiles/default
 
 ⚡ First launch — a fresh Chrome window opened.
    Log into the sites you want to automate (Gmail, GitHub, etc.).
@@ -271,7 +271,7 @@ Every interactive element gets a number. Use that number with `click` and `type`
 
 ```
 ┌─────────────┐     CDP (WebSocket)     ┌──────────────────┐
-│  browser-py  │ ◄──────────────────────► │  Chrome/Chromium  │
+│  tappi  │ ◄──────────────────────► │  Chrome/Chromium  │
 │  (your code) │     localhost:9222       │  (your sessions)  │
 └─────────────┘                          └──────────────────┘
 ```
@@ -295,7 +295,7 @@ The element scanner recursively enters every shadow root. Reddit, GitHub, Salesf
 ## Using as a Python Library
 
 ```python
-from browser_py import Browser
+from tappi import Browser
 
 Browser.launch()              # Start Chrome
 b = Browser()                 # Connect
@@ -312,7 +312,7 @@ b.upload("~/file.pdf")        # Upload file
 ### Profile management
 
 ```python
-from browser_py.profiles import create_profile, list_profiles, get_profile
+from tappi.profiles import create_profile, list_profiles, get_profile
 
 create_profile("work")        # → port 9222
 create_profile("personal")    # → port 9223
@@ -326,7 +326,7 @@ b = Browser(f"http://127.0.0.1:{work['port']}")
 ### Agent as a library
 
 ```python
-from browser_py.agent.loop import Agent
+from tappi.agent.loop import Agent
 
 agent = Agent(
     browser_profile="default",
@@ -419,13 +419,13 @@ bpy launch work             # Terminal 2: work on 9223
 CDP_URL=http://127.0.0.1:9223 bpy tabs   # Control work profile
 ```
 
-Profiles live at `~/.browser-py/profiles/<name>/`. Config at `~/.browser-py/config.json`.
+Profiles live at `~/.tappi/profiles/<name>/`. Config at `~/.tappi/config.json`.
 
 ---
 
 ## Shadow DOM Support
 
-browser-py automatically pierces shadow DOM boundaries. No configuration needed.
+tappi automatically pierces shadow DOM boundaries. No configuration needed.
 
 ```bash
 bpy open reddit.com
@@ -465,11 +465,11 @@ Chrome, Chromium, Brave, Microsoft Edge — anything Chromium-based with CDP sup
 Yes. `bpy launch --headless` runs without a visible window. Log in with a visible window first to set up sessions.
 
 **Q: Is my data safe?**
-File operations are sandboxed to your workspace directory. The agent cannot access files outside it. Shell access can be disabled. API keys are stored locally in `~/.browser-py/config.json`.
+File operations are sandboxed to your workspace directory. The agent cannot access files outside it. Shell access can be disabled. API keys are stored locally in `~/.tappi/config.json`.
 
 **Q: How is this different from Selenium/Playwright?**
 
-| | browser-py | Selenium | Playwright |
+| | tappi | Selenium | Playwright |
 |---|:---:|:---:|:---:|
 | Session reuse | ✅ | ❌ | Partial |
 | AI agent | ✅ | ❌ | ❌ |
@@ -482,8 +482,8 @@ File operations are sandboxed to your workspace directory. The agent cannot acce
 ## Architecture
 
 ```
-browser-py/
-├── browser_py/
+tappi/
+├── tappi/
 │   ├── core.py                 # CDP engine (Phase 1)
 │   ├── cli.py                  # bpy CLI
 │   ├── profiles.py             # Named profile management

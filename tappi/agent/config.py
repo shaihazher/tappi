@@ -1,6 +1,6 @@
 """Agent configuration — provider keys, workspace, model selection.
 
-All config lives in ~/.browser-py/config.json alongside profile data.
+All config lives in ~/.tappi/config.json alongside profile data.
 The agent section is nested under "agent" key.
 """
 
@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-CONFIG_DIR = Path.home() / ".browser-py"
+CONFIG_DIR = Path.home() / ".tappi"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
 # Provider defaults
@@ -170,8 +170,8 @@ def get_workspace() -> Path:
     ws = agent_cfg.get("workspace")
     if ws:
         return Path(ws).expanduser().resolve()
-    # Default: ~/browser-py-workspace
-    return Path.home() / "browser-py-workspace"
+    # Default: ~/tappi-workspace
+    return Path.home() / "tappi-workspace"
 
 
 def get_provider() -> str:

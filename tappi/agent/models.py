@@ -13,7 +13,7 @@ from typing import Any
 from urllib.request import Request, urlopen
 from urllib.error import URLError
 
-from browser_py.agent.config import get_provider_key, PROVIDERS
+from tappi.agent.config import get_provider_key, PROVIDERS
 
 # Cache: {provider: (timestamp, [models])}
 _cache: dict[str, tuple[float, list[dict]]] = {}

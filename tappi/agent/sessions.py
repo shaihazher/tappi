@@ -1,6 +1,6 @@
 """Chat session persistence — save, restore, list, and manage sessions.
 
-Sessions are stored as JSON files in ~/.browser-py/sessions/.
+Sessions are stored as JSON files in ~/.tappi/sessions/.
 Each session tracks conversation history, token usage, model info, and metadata.
 """
 
@@ -12,7 +12,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from browser_py.agent.config import CONFIG_DIR
+from tappi.agent.config import CONFIG_DIR
 
 SESSIONS_DIR = CONFIG_DIR / "sessions"
 

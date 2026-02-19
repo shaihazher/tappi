@@ -1,16 +1,16 @@
-"""browser-py CLI — control your browser from the terminal.
+"""tappi CLI — control your browser from the terminal.
 
 Usage:
-    browser-py <command> [args...]
-    browser-py --help
+    tappi <command> [args...]
+    tappi --help
 
 Examples:
-    browser-py tabs                     # See your open tabs
-    browser-py open github.com          # Go to a URL
-    browser-py elements                 # What can I click?
-    browser-py click 3                  # Click element [3]
-    browser-py type 5 "hello world"     # Type into element [5]
-    browser-py text                     # Read the page
+    tappi tabs                     # See your open tabs
+    tappi open github.com          # Go to a URL
+    tappi elements                 # What can I click?
+    tappi click 3                  # Click element [3]
+    tappi type 5 "hello world"     # Type into element [5]
+    tappi text                     # Read the page
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ import sys
 import os
 import textwrap
 
-from browser_py.core import Browser, CDPError, BrowserNotRunning, _find_chrome
-from browser_py.profiles import (
+from tappi.core import Browser, CDPError, BrowserNotRunning, _find_chrome
+from tappi.profiles import (
     list_profiles,
     get_profile,
     create_profile,
@@ -62,11 +62,11 @@ def _red(s: str) -> str:
 
 COMMANDS_HELP = {
     "launch": {
-        "usage": "browser-py launch [name] [--headless] [--port PORT]",
+        "usage": "tappi launch [name] [--headless] [--port PORT]",
         "desc": (
             "Start Chrome with a named profile.\n\n"
             "Each profile has its own browser sessions (cookies, logins) and\n"
-            "its own CDP port. Profiles live in ~/.browser-py/profiles/<name>/.\n\n"
+            "its own CDP port. Profiles live in ~/.tappi/profiles/<name>/.\n\n"
             "Subcommands:\n"
             "  launch              Launch the default profile\n"
             "  launch <name>       Launch a specific profile\n"
@@ -76,16 +76,16 @@ COMMANDS_HELP = {
             "  launch delete <name>      Delete a profile"
         ),
         "example": (
-            "  $ browser-py launch\n"
+            "  $ tappi launch\n"
             "  ✓ Chrome launched — profile: default (port 9222)\n\n"
-            "  $ browser-py launch new work\n"
+            "  $ tappi launch new work\n"
             "  ✓ Created profile 'work' (port 9223)\n\n"
-            "  $ browser-py launch work\n"
+            "  $ tappi launch work\n"
             "  ✓ Chrome launched — profile: work (port 9223)\n\n"
-            "  $ browser-py launch list\n"
+            "  $ tappi launch list\n"
             "  default  port 9222  ★ default\n"
             "  work     port 9223\n\n"
-            "  $ browser-py launch --default work\n"
+            "  $ tappi launch --default work\n"
             "  ✓ Default profile set to 'work'"
         ),
         "hint": (
@@ -95,51 +95,51 @@ COMMANDS_HELP = {
         ),
     },
     "tabs": {
-        "usage": "browser-py tabs",
+        "usage": "tappi tabs",
         "desc": "List all open browser tabs with their index, title, and URL.",
         "example": (
-            "  $ browser-py tabs\n"
+            "  $ tappi tabs\n"
             "  [0] Google — https://google.com\n"
             "  [1] GitHub — https://github.com"
         ),
         "hint": "Use the [index] number with 'tab' to switch tabs.",
     },
     "open": {
-        "usage": "browser-py open <url>",
+        "usage": "tappi open <url>",
         "desc": "Navigate the current tab to a URL. Adds https:// if missing.",
-        "example": "  $ browser-py open github.com\n  Navigated to https://github.com",
+        "example": "  $ tappi open github.com\n  Navigated to https://github.com",
         "hint": "After navigating, run 'elements' to see what you can interact with.",
     },
     "tab": {
-        "usage": "browser-py tab <index>",
+        "usage": "tappi tab <index>",
         "desc": "Switch to a different tab by its index number.",
-        "example": "  $ browser-py tab 2\n  Switched to tab [2]: Reddit — https://reddit.com",
+        "example": "  $ tappi tab 2\n  Switched to tab [2]: Reddit — https://reddit.com",
         "hint": "Run 'tabs' first to see available tabs and their indices.",
     },
     "newtab": {
-        "usage": "browser-py newtab [url]",
+        "usage": "tappi newtab [url]",
         "desc": "Open a new browser tab, optionally with a URL.",
-        "example": "  $ browser-py newtab https://example.com",
+        "example": "  $ tappi newtab https://example.com",
     },
     "close": {
-        "usage": "browser-py close [index]",
+        "usage": "tappi close [index]",
         "desc": "Close a tab. Closes the current tab if no index given.",
-        "example": "  $ browser-py close 3",
+        "example": "  $ tappi close 3",
     },
     "elements": {
-        "usage": "browser-py elements [css-selector]",
+        "usage": "tappi elements [css-selector]",
         "desc": (
             "List all interactive elements on the page — links, buttons, inputs, etc.\n"
             "Each element gets a number you can use with 'click' and 'type'.\n"
             "Pierces shadow DOM automatically (works on Reddit, GitHub, etc.)."
         ),
         "example": (
-            "  $ browser-py elements\n"
+            "  $ tappi elements\n"
             "  [0] (link) Home → /\n"
             "  [1] (button) Sign In\n"
             "  [2] (input:text) Search\n"
             "  [3] (link) About → /about\n\n"
-            "  $ browser-py elements \".sidebar\"   # Only sidebar elements"
+            "  $ tappi elements \".sidebar\"   # Only sidebar elements"
         ),
         "hint": (
             "Elements are numbered — use 'click 1' or 'type 2 hello' to interact.\n"
@@ -147,111 +147,111 @@ COMMANDS_HELP = {
         ),
     },
     "click": {
-        "usage": "browser-py click <index>",
+        "usage": "tappi click <index>",
         "desc": (
             "Click an element by its index number from 'elements' output.\n"
             "Uses real mouse events (works with React, Vue, Angular, etc.)."
         ),
-        "example": "  $ browser-py click 1\n  Clicked: (button) Sign In",
+        "example": "  $ tappi click 1\n  Clicked: (button) Sign In",
         "hint": (
             "If the page changed since 'elements', indices may be stale.\n"
             "Run 'elements' again to re-index."
         ),
     },
     "type": {
-        "usage": "browser-py type <index> <text>",
+        "usage": "tappi type <index> <text>",
         "desc": (
             "Type text into an input element. Clears existing content first.\n"
             "Works with inputs, textareas, contenteditable, and ARIA textboxes."
         ),
         "example": (
-            "  $ browser-py type 2 \"hello world\"\n"
+            "  $ tappi type 2 \"hello world\"\n"
             "  Typed into [2] (input)"
         ),
         "hint": "The element must be a text input. If it's a button or link, use 'click' instead.",
     },
     "text": {
-        "usage": "browser-py text [css-selector]",
+        "usage": "tappi text [css-selector]",
         "desc": "Extract visible text from the page (max 8KB). Pierces shadow DOM.",
         "example": (
-            "  $ browser-py text\n"
+            "  $ tappi text\n"
             "  Welcome to GitHub. Let's build from here ...\n\n"
-            "  $ browser-py text \".main-content\"   # Just the main area"
+            "  $ tappi text \".main-content\"   # Just the main area"
         ),
     },
     "html": {
-        "usage": "browser-py html <css-selector>",
+        "usage": "tappi html <css-selector>",
         "desc": "Get the outerHTML of a specific element (max 10KB).",
-        "example": "  $ browser-py html \"nav.header\"",
+        "example": "  $ tappi html \"nav.header\"",
     },
     "eval": {
-        "usage": "browser-py eval <javascript>",
+        "usage": "tappi eval <javascript>",
         "desc": "Run JavaScript in the page context and print the result.",
         "example": (
-            "  $ browser-py eval \"document.title\"\n"
+            "  $ tappi eval \"document.title\"\n"
             "  GitHub\n\n"
-            "  $ browser-py eval \"document.querySelectorAll('img').length\"\n"
+            "  $ tappi eval \"document.querySelectorAll('img').length\"\n"
             "  42"
         ),
     },
     "screenshot": {
-        "usage": "browser-py screenshot [path]",
+        "usage": "tappi screenshot [path]",
         "desc": "Save a screenshot of the current page.",
         "example": (
-            "  $ browser-py screenshot\n"
-            "  /tmp/browser_py_screenshot_1708300000.png\n\n"
-            "  $ browser-py screenshot ~/Desktop/page.png"
+            "  $ tappi screenshot\n"
+            "  /tmp/tappi_screenshot_1708300000.png\n\n"
+            "  $ tappi screenshot ~/Desktop/page.png"
         ),
     },
     "scroll": {
-        "usage": "browser-py scroll <up|down|top|bottom> [pixels]",
+        "usage": "tappi scroll <up|down|top|bottom> [pixels]",
         "desc": "Scroll the page in a direction. Default: 600px.",
-        "example": "  $ browser-py scroll down 1000",
+        "example": "  $ tappi scroll down 1000",
     },
     "url": {
-        "usage": "browser-py url",
+        "usage": "tappi url",
         "desc": "Print the current page URL.",
-        "example": "  $ browser-py url\n  https://github.com",
+        "example": "  $ tappi url\n  https://github.com",
     },
     "back": {
-        "usage": "browser-py back",
+        "usage": "tappi back",
         "desc": "Go back in browser history.",
     },
     "forward": {
-        "usage": "browser-py forward",
+        "usage": "tappi forward",
         "desc": "Go forward in browser history.",
     },
     "refresh": {
-        "usage": "browser-py refresh",
+        "usage": "tappi refresh",
         "desc": "Reload the current page.",
     },
     "upload": {
-        "usage": "browser-py upload <file-path> [css-selector]",
+        "usage": "tappi upload <file-path> [css-selector]",
         "desc": (
             "Upload a file to a file input. Bypasses the OS file picker dialog.\n"
             "Default selector: input[type=\"file\"]"
         ),
         "example": (
-            "  $ browser-py upload ~/photos/avatar.jpg\n"
+            "  $ tappi upload ~/photos/avatar.jpg\n"
             "  Uploaded: avatar.jpg → input[type=\"file\"]\n\n"
-            "  $ browser-py upload ~/doc.pdf \"input.file-drop\""
+            "  $ tappi upload ~/doc.pdf \"input.file-drop\""
         ),
     },
     "wait": {
-        "usage": "browser-py wait <ms>",
+        "usage": "tappi wait <ms>",
         "desc": "Wait for a duration (useful in scripts).",
-        "example": "  $ browser-py wait 2000\n  Waited 2000ms",
+        "example": "  $ tappi wait 2000\n  Waited 2000ms",
     },
 }
 
 
 def print_main_help() -> None:
     """Print the main help screen."""
-    print(_bold("browser-py") + " — Control your browser from the terminal\n")
+    print(_bold("tappi") + " — Control your browser from the terminal\n")
     print(_dim("Connects to Chrome/Chromium via CDP (Chrome DevTools Protocol)."))
     print(_dim("Your logged-in sessions, cookies, and extensions all carry over.\n"))
 
-    print(_bold("Usage:") + " browser-py <command> [args...]\n")
+    print(_bold("Usage:") + " tappi <command> [args...]\n")
 
     # Group commands
     groups = [
@@ -326,15 +326,15 @@ def print_main_help() -> None:
         print()
 
     print(_bold("Quick start:"))
-    print(_dim("  browser-py open example.com    # Navigate"))
-    print(_dim("  browser-py elements            # See what's clickable"))
-    print(_dim("  browser-py click 3             # Click element [3]"))
-    print(_dim("  browser-py type 5 hello        # Type into element [5]"))
+    print(_dim("  tappi open example.com    # Navigate"))
+    print(_dim("  tappi elements            # See what's clickable"))
+    print(_dim("  tappi click 3             # Click element [3]"))
+    print(_dim("  tappi type 5 hello        # Type into element [5]"))
     print()
     print(_dim("Env: CDP_URL — override CDP endpoint (default: http://127.0.0.1:9222)"))
     print(_dim("     NO_COLOR — disable colored output"))
     print()
-    print(_dim("Run 'browser-py <command> --help' for detailed help on any command."))
+    print(_dim("Run 'tappi <command> --help' for detailed help on any command."))
 
 
 def print_command_help(cmd: str) -> None:
@@ -342,7 +342,7 @@ def print_command_help(cmd: str) -> None:
     info = COMMANDS_HELP.get(cmd)
     if not info:
         print(f"Unknown command: {cmd}")
-        print("Run 'browser-py --help' to see all commands.")
+        print("Run 'tappi --help' to see all commands.")
         return
 
     print(_bold(info["usage"]))
@@ -405,7 +405,7 @@ def run_launch(args: list[str]) -> str:
         if not profiles:
             return (
                 "No profiles yet.\n"
-                + _dim("Create one with: browser-py launch new <name>")
+                + _dim("Create one with: tappi launch new <name>")
             )
         lines = [_bold("Profiles:"), ""]
         max_name = max(len(p["name"]) for p in profiles)
@@ -415,7 +415,7 @@ def run_launch(args: list[str]) -> str:
                 f"  {p['name']:<{max_name}}  port {p['port']}{default_marker}"
             )
         lines.append("")
-        lines.append(_dim("Launch with: browser-py launch <name>"))
+        lines.append(_dim("Launch with: tappi launch <name>"))
         return "\n".join(lines)
 
     # ── launch new [name] ──
@@ -447,7 +447,7 @@ def run_launch(args: list[str]) -> str:
     # ── launch delete <name> ──
     if subcmd == "delete":
         if len(positional) < 2:
-            return _red("Usage: browser-py launch delete <name>")
+            return _red("Usage: tappi launch delete <name>")
         name = positional[1]
         msg = delete_profile(name)
         return f"✓ {msg}"
@@ -462,8 +462,8 @@ def run_launch(args: list[str]) -> str:
         if profile_name:
             return (
                 _red(f"Profile '{profile_name}' not found.\n")
-                + f"\nCreate it with: {_bold(f'browser-py launch new {profile_name}')}\n"
-                + f"Or list existing: {_bold('browser-py launch list')}"
+                + f"\nCreate it with: {_bold(f'tappi launch new {profile_name}')}\n"
+                + f"Or list existing: {_bold('tappi launch list')}"
             )
         # No profiles at all — create "default"
         profile = create_profile("default", port=port_override or 9222)
@@ -491,7 +491,7 @@ def _launch_profile(
         _json.loads(urlopen(f"http://127.0.0.1:{port}/json/version", timeout=2).read())
         return (
             f"✓ Profile {_bold(name)} already running (port {port})\n"
-            + _dim("  Ready to use — try: browser-py tabs")
+            + _dim("  Ready to use — try: tappi tabs")
         )
     except (URLError, OSError):
         pass
@@ -518,16 +518,16 @@ def _launch_profile(
         lines.append("")
         lines.append(_dim("   When ready, open another terminal and run:"))
         if port != 9222:
-            lines.append(_dim(f"   CDP_URL=http://127.0.0.1:{port} browser-py tabs"))
+            lines.append(_dim(f"   CDP_URL=http://127.0.0.1:{port} tappi tabs"))
         else:
-            lines.append(_dim("   browser-py tabs"))
+            lines.append(_dim("   tappi tabs"))
     else:
         lines.append("")
         lines.append(_dim("Ready — your saved sessions are active."))
         if port != 9222:
-            lines.append(_dim(f"Connect with: CDP_URL=http://127.0.0.1:{port} browser-py <command>"))
+            lines.append(_dim(f"Connect with: CDP_URL=http://127.0.0.1:{port} tappi <command>"))
         else:
-            lines.append(_dim("Try: browser-py tabs"))
+            lines.append(_dim("Try: tappi tabs"))
 
     return "\n".join(lines)
 
@@ -645,24 +645,24 @@ def run_command(browser: Browser, cmd: str, args: list[str]) -> str | None:
 
     else:
         print(_red(f"Unknown command: {cmd}"))
-        print("Run 'browser-py --help' to see all commands.")
+        print("Run 'tappi --help' to see all commands.")
         sys.exit(1)
 
 
 def run_agent(args: list[str]) -> None:
     """Run the agent with a one-shot message or interactive mode."""
-    from browser_py.agent.config import is_configured
+    from tappi.agent.config import is_configured
 
     if not is_configured():
         print(_yellow("Agent not configured. Running setup first...\n"))
-        from browser_py.agent.setup import run_setup
+        from tappi.agent.setup import run_setup
         run_setup()
         return
 
     if not args:
         # Interactive mode
-        from browser_py.agent.loop import Agent
-        from browser_py.agent.config import get_agent_config
+        from tappi.agent.loop import Agent
+        from tappi.agent.config import get_agent_config
 
         cfg = get_agent_config()
         agent = Agent(
@@ -675,7 +675,7 @@ def run_agent(args: list[str]) -> None:
         if not cfg.get("shell_enabled", True):
             agent._shell.enabled = False
 
-        print(_bold("browser-py agent") + _dim(" (type 'quit' to exit, 'reset' to clear)\n"))
+        print(_bold("tappi agent") + _dim(" (type 'quit' to exit, 'reset' to clear)\n"))
 
         while True:
             try:
@@ -698,8 +698,8 @@ def run_agent(args: list[str]) -> None:
     else:
         # One-shot mode
         message = " ".join(args)
-        from browser_py.agent.loop import Agent
-        from browser_py.agent.config import get_agent_config
+        from tappi.agent.loop import Agent
+        from tappi.agent.config import get_agent_config
 
         cfg = get_agent_config()
         agent = Agent(
@@ -717,7 +717,7 @@ def run_agent(args: list[str]) -> None:
 
 def run_research_cli(args: list[str]) -> None:
     """Run deep research from the CLI."""
-    from browser_py.agent.config import is_configured
+    from tappi.agent.config import is_configured
 
     if not is_configured():
         print(_yellow("Agent not configured. Run 'bpy setup' first."))
@@ -736,8 +736,8 @@ def run_research_cli(args: list[str]) -> None:
         icon = "✅" if stage in ("planned", "researched", "complete", "done") else "⏳"
         print(f"  {icon} {message}")
 
-    from browser_py.agent.research import run_research
-    from browser_py.agent.config import get_agent_config
+    from tappi.agent.research import run_research
+    from tappi.agent.config import get_agent_config
 
     cfg = get_agent_config()
     result = run_research(
@@ -772,7 +772,7 @@ def run_serve(args: list[str]) -> None:
         else:
             i += 1
 
-    from browser_py.server.app import start_server
+    from tappi.server.app import start_server
     start_server(host=host, port=port)
 
 
@@ -795,14 +795,14 @@ def main() -> None:
 
     # Version
     if cmd in ("--version", "-V", "version"):
-        from browser_py import __version__
-        print(f"browser-py {__version__}")
+        from tappi import __version__
+        print(f"tappi {__version__}")
         return
 
     try:
         # Agent commands
         if cmd == "setup":
-            from browser_py.agent.setup import run_setup
+            from tappi.agent.setup import run_setup
             run_setup()
             return
 
@@ -833,7 +833,7 @@ def main() -> None:
         print(_red("✗ Browser not running\n"))
         print(str(e))
         print()
-        print(_yellow("💡 Quick fix:") + " run " + _bold("browser-py launch") + " to start Chrome with remote debugging.")
+        print(_yellow("💡 Quick fix:") + " run " + _bold("tappi launch") + " to start Chrome with remote debugging.")
         sys.exit(1)
     except CDPError as e:
         print(_red(f"✗ {e}"))

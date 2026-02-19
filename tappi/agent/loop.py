@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable
 
-from browser_py.agent.config import (
+from tappi.agent.config import (
     get_agent_config,
     get_model,
     get_provider,
@@ -22,12 +22,12 @@ from browser_py.agent.config import (
     get_workspace,
     PROVIDERS,
 )
-from browser_py.agent.tools.browser import BrowserTool, TOOL_SCHEMA as BROWSER_SCHEMA
-from browser_py.agent.tools.files import FilesTool, TOOL_SCHEMA as FILES_SCHEMA
-from browser_py.agent.tools.pdf import PDFTool, TOOL_SCHEMA as PDF_SCHEMA
-from browser_py.agent.tools.spreadsheet import SpreadsheetTool, TOOL_SCHEMA as SPREADSHEET_SCHEMA
-from browser_py.agent.tools.shell import ShellTool, TOOL_SCHEMA as SHELL_SCHEMA
-from browser_py.agent.tools.cron import CronTool, TOOL_SCHEMA as CRON_SCHEMA
+from tappi.agent.tools.browser import BrowserTool, TOOL_SCHEMA as BROWSER_SCHEMA
+from tappi.agent.tools.files import FilesTool, TOOL_SCHEMA as FILES_SCHEMA
+from tappi.agent.tools.pdf import PDFTool, TOOL_SCHEMA as PDF_SCHEMA
+from tappi.agent.tools.spreadsheet import SpreadsheetTool, TOOL_SCHEMA as SPREADSHEET_SCHEMA
+from tappi.agent.tools.shell import ShellTool, TOOL_SCHEMA as SHELL_SCHEMA
+from tappi.agent.tools.cron import CronTool, TOOL_SCHEMA as CRON_SCHEMA
 
 
 SYSTEM_PROMPT = """\
@@ -190,7 +190,7 @@ class Agent:
     def _build_system_prompt(self) -> str:
         """Build system prompt with current context usage stats."""
         from datetime import date as _date
-        from browser_py.agent.sessions import get_context_limit
+        from tappi.agent.sessions import get_context_limit
 
         model = get_model()
         context_limit = get_context_limit(model)
@@ -417,7 +417,7 @@ class Agent:
         Returns:
             Path to the dump file.
         """
-        from browser_py.agent.sessions import get_context_limit
+        from tappi.agent.sessions import get_context_limit
 
         model = get_model()
         context_limit = get_context_limit(model)
@@ -496,7 +496,7 @@ class Agent:
 
     def _check_context_compact(self) -> None:
         """If context window usage exceeds 75%, dump and compact."""
-        from browser_py.agent.sessions import get_context_limit
+        from tappi.agent.sessions import get_context_limit
 
         model = get_model()
         context_limit = get_context_limit(model)
@@ -532,7 +532,7 @@ class Agent:
         # Try to decompose the task
         self._last_activity = {"state": "decomposing", "time": time.time()}
         try:
-            from browser_py.agent.decompose import decompose_task, SubtaskRunner, Subtask
+            from tappi.agent.decompose import decompose_task, SubtaskRunner, Subtask
             subtasks = decompose_task(user_message)
         except Exception:
             subtasks = None
@@ -552,7 +552,7 @@ class Agent:
         history gets a summary of what happened.
         """
         import threading
-        from browser_py.agent.decompose import SubtaskRunner, Subtask
+        from tappi.agent.decompose import SubtaskRunner, Subtask
 
         self.messages.append({"role": "user", "content": user_message})
         self._abort = False
@@ -890,7 +890,7 @@ class Agent:
         Uses _last_prompt_tokens (actual context window from last LLM call)
         for percentage/warnings, not cumulative totals.
         """
-        from browser_py.agent.sessions import get_context_limit
+        from tappi.agent.sessions import get_context_limit
 
         model = get_model()
         context_limit = get_context_limit(model)
@@ -915,7 +915,7 @@ class Agent:
 
         Returns True if loaded successfully.
         """
-        from browser_py.agent.sessions import load_session as _load
+        from tappi.agent.sessions import load_session as _load
 
         session = _load(session_id)
         if not session:
@@ -937,7 +937,7 @@ class Agent:
 
         Returns session metadata.
         """
-        from browser_py.agent.sessions import save_session, generate_session_id
+        from tappi.agent.sessions import save_session, generate_session_id
 
         if not self.session_id:
             self.session_id = generate_session_id()

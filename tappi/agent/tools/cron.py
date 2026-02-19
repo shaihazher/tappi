@@ -1,6 +1,6 @@
 """Cron tool — schedule recurring tasks via APScheduler.
 
-Jobs are stored in a SQLite database inside ~/.browser-py/jobs.db
+Jobs are stored in a SQLite database inside ~/.tappi/jobs.db
 so they persist across restarts. Each job triggers an agent loop
 that executes the task description.
 """
@@ -78,7 +78,7 @@ TOOL_SCHEMA = {
 
 
 # Job store — in-memory with SQLite persistence
-_JOBS_FILE = Path.home() / ".browser-py" / "jobs.json"
+_JOBS_FILE = Path.home() / ".tappi" / "jobs.json"
 
 
 def _load_jobs() -> dict[str, dict]:

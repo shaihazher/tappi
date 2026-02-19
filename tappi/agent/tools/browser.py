@@ -1,4 +1,4 @@
-"""Browser tool — wraps browser-py CDP commands for the LLM agent.
+"""Browser tool — wraps tappi CDP commands for the LLM agent.
 
 Exposes browser control as a single tool with an `action` parameter,
 keeping the tool count low (LLMs work better with fewer, richer tools).
@@ -9,8 +9,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from browser_py.core import Browser, CDPError, BrowserNotRunning
-from browser_py.profiles import list_profiles, get_profile, create_profile
+from tappi.core import Browser, CDPError, BrowserNotRunning
+from tappi.profiles import list_profiles, get_profile, create_profile
 
 TOOL_SCHEMA = {
     "type": "function",
@@ -291,7 +291,7 @@ class BrowserTool:
 
     def _launch(self, profile_name: str | None = None) -> str:
         """Launch a browser profile."""
-        from browser_py.core import Browser as B
+        from tappi.core import Browser as B
 
         name = profile_name or self._default_profile
         try:
@@ -390,7 +390,7 @@ class BrowserTool:
 
         # Persist to config so the profile picker and cron jobs pick it up
         try:
-            from browser_py.agent.config import load_config, save_config
+            from tappi.agent.config import load_config, save_config
             cfg = load_config()
             cfg.setdefault("agent", {})["browser_profile"] = name
             save_config(cfg)

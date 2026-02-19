@@ -1,10 +1,10 @@
-"""browser-py — Lightweight CDP browser control for Python.
+"""tappi — Lightweight CDP browser control for Python.
 
 Connect to any Chrome/Chromium with --remote-debugging-port and control it
 programmatically. Reuses existing browser sessions (cookies, logins, extensions).
 
 Quick start:
-    from browser_py import Browser
+    from tappi import Browser
 
     b = Browser()                    # Connect to CDP (default: localhost:9222)
     b.open("https://example.com")    # Navigate
@@ -14,7 +14,7 @@ Quick start:
     print(b.text())                  # Read page text
 """
 
-from browser_py.core import Browser, CDPSession
+from tappi.core import Browser, CDPSession
 
 __version__ = "0.3.0"
 __all__ = ["Browser", "CDPSession"]

@@ -7,7 +7,7 @@ but with fixed rules:
 - Compilation: read all findings → produce structured report (max_tokens 16384)
 
 Usage:
-    from browser_py.agent.research import run_research
+    from tappi.agent.research import run_research
     result = run_research("What are the best Python web frameworks in 2025?")
 """
 
@@ -16,8 +16,8 @@ from __future__ import annotations
 import time
 from typing import Any, Callable
 
-from browser_py.agent.config import get_agent_config, get_workspace
-from browser_py.agent.decompose import (
+from tappi.agent.config import get_agent_config, get_workspace
+from tappi.agent.decompose import (
     SubtaskRunner,
     Subtask,
     decompose_research,

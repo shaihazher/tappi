@@ -1,15 +1,15 @@
-"""Profile management for browser-py.
+"""Profile management for tappi.
 
-Stores profiles in ~/.browser-py/profiles/<name>/ with a central
-config at ~/.browser-py/config.json for defaults and port assignments.
+Stores profiles in ~/.tappi/profiles/<name>/ with a central
+config at ~/.tappi/config.json for defaults and port assignments.
 
 Usage:
-    browser-py launch              # Launch default profile
-    browser-py launch work         # Launch profile "work"
-    browser-py launch new          # Create a new profile interactively
-    browser-py launch new myname   # Create profile "myname"
-    browser-py launch list         # List all profiles
-    browser-py launch --default work  # Set "work" as the default
+    tappi launch              # Launch default profile
+    tappi launch work         # Launch profile "work"
+    tappi launch new          # Create a new profile interactively
+    tappi launch new myname   # Create profile "myname"
+    tappi launch list         # List all profiles
+    tappi launch --default work  # Set "work" as the default
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-CONFIG_DIR = Path.home() / ".browser-py"
+CONFIG_DIR = Path.home() / ".tappi"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 PROFILES_DIR = CONFIG_DIR / "profiles"
 BASE_PORT = 9222
@@ -57,7 +57,7 @@ def _next_port(config: dict[str, Any]) -> int:
 
 
 def _migrate_legacy() -> None:
-    """Migrate old single-profile setup (~/.browser-py/profile/) to named profiles."""
+    """Migrate old single-profile setup (~/.tappi/profile/) to named profiles."""
     legacy_dir = CONFIG_DIR / "profile"
     if legacy_dir.exists() and legacy_dir.is_dir():
         config = _load_config()
@@ -140,7 +140,7 @@ def get_profile(name: str | None = None) -> dict[str, Any]:
     raise ValueError(
         f"Profile '{name}' not found.\n"
         f"Available profiles: {', '.join(profiles.keys()) or '(none)'}\n"
-        f"Create one with: browser-py launch new {name}"
+        f"Create one with: tappi launch new {name}"
     )
 
 
@@ -163,7 +163,7 @@ def create_profile(name: str, port: int | None = None) -> dict[str, Any]:
     profiles = config.setdefault("profiles", {})
 
     if name in profiles:
-        raise ValueError(f"Profile '{name}' already exists. Use: browser-py launch {name}")
+        raise ValueError(f"Profile '{name}' already exists. Use: tappi launch {name}")
 
     assigned_port = port or _next_port(config)
     profiles[name] = {"port": assigned_port}

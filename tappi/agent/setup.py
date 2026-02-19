@@ -9,13 +9,13 @@ import os
 import sys
 from pathlib import Path
 
-from browser_py.agent.config import (
+from tappi.agent.config import (
     load_config,
     save_config,
     PROVIDERS,
     is_configured,
 )
-from browser_py.profiles import list_profiles, create_profile, get_profile
+from tappi.profiles import list_profiles, create_profile, get_profile
 
 
 def _bold(s: str) -> str:
@@ -65,7 +65,7 @@ def _input(prompt: str, default: str = "") -> str:
 def run_setup() -> None:
     """Run the interactive setup wizard."""
     print()
-    print(_bold("🔧 browser-py agent setup"))
+    print(_bold("🔧 tappi agent setup"))
     print(_dim("Configure your LLM provider, workspace, and browser.\n"))
 
     config = load_config()
@@ -130,7 +130,7 @@ def run_setup() -> None:
     if not has_key:
         if provider_key == "claude_max":
             # Try auto-detect first
-            from browser_py.agent.config import detect_claude_oauth_token
+            from tappi.agent.config import detect_claude_oauth_token
             detected = detect_claude_oauth_token()
             if detected:
                 print(f"  {_green('✓')} Auto-detected Claude OAuth token")
@@ -176,7 +176,7 @@ def run_setup() -> None:
     # ── Step 4: Workspace ──
     print(_cyan("Step 4: Workspace Directory"))
     print(_dim("  All file operations are sandboxed to this directory."))
-    default_ws = str(agent_cfg.get("workspace", Path.home() / "browser-py-workspace"))
+    default_ws = str(agent_cfg.get("workspace", Path.home() / "tappi-workspace"))
     workspace = _input("  Workspace path", default_ws)
     workspace_path = Path(workspace).expanduser().resolve()
     workspace_path.mkdir(parents=True, exist_ok=True)
@@ -228,7 +228,7 @@ def run_setup() -> None:
 
     print(_green("✓ Setup complete!"))
     print()
-    print(f"  Config saved to: {_dim(str(Path.home() / '.browser-py' / 'config.json'))}")
+    print(f"  Config saved to: {_dim(str(Path.home() / '.tappi' / 'config.json'))}")
     print()
     print(_bold("Next steps:"))
     print(f"  {_dim('Chat:')}     bpy agent \"Go to github.com and find trending repos\"")

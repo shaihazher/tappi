@@ -24,7 +24,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable
 
-from browser_py.agent.config import get_agent_config, get_model, get_provider, get_provider_key, PROVIDERS
+from tappi.agent.config import get_agent_config, get_model, get_provider, get_provider_key, PROVIDERS
 
 
 # ── Prompts ──
@@ -506,7 +506,7 @@ class SubtaskRunner:
 
     def _create_mini_agent(self, system_prompt: str) -> 'Agent':
         """Create a focused mini-agent for a single subtask."""
-        from browser_py.agent.loop import Agent
+        from tappi.agent.loop import Agent
 
         cfg = get_agent_config()
         agent = Agent(
