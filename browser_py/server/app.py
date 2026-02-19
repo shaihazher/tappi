@@ -27,6 +27,7 @@ _agent: Agent | None = None
 _agent_lock = threading.Lock()
 _ws_clients: list[WebSocket] = []
 _chat_task: asyncio.Task | None = None  # tracks the running chat task
+_research_abort = threading.Event()  # shared abort signal for research
 
 
 def _on_token_update(usage: dict) -> None:
@@ -251,8 +252,9 @@ async def flush_agent() -> JSONResponse:
     except RuntimeError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
-    # Set abort flag (in case the loop is between steps)
+    # Set abort flags
     agent._abort = True
+    _research_abort.set()
 
     # Dump context immediately from here — don't wait for the loop
     dump_path = None
@@ -307,6 +309,8 @@ async def start_research(body: dict) -> JSONResponse:
 
     import threading
 
+    _research_abort.clear()
+
     def _run() -> None:
         from browser_py.agent.research import run_research
         try:
@@ -315,14 +319,18 @@ async def start_research(body: dict) -> JSONResponse:
                 on_progress=on_progress,
                 browser_profile=cfg.get("browser_profile"),
                 num_agents=num_agents,
+                abort_event=_research_abort,
             )
-            msg = json.dumps({
-                "type": "research_complete",
-                "report_path": result["report_path"],
-                "report": result["report"][:50000],
-                "duration": result["duration_seconds"],
-                "subtopics": result["subtopics"],
-            })
+            if _research_abort.is_set():
+                msg = json.dumps({"type": "research_error", "error": "Flushed by user"})
+            else:
+                msg = json.dumps({
+                    "type": "research_complete",
+                    "report_path": result["report_path"],
+                    "report": result["report"][:50000],
+                    "duration": result["duration_seconds"],
+                    "subtopics": result["subtopics"],
+                })
             _broadcast(msg)
         except Exception as e:
             msg = json.dumps({
@@ -1275,7 +1283,11 @@ _FALLBACK_HTML = """\
 
   <!-- Research Page -->
   <div class="page" id="page-research">
-    <header><h2>🔬 Deep Research</h2></header>
+    <header>
+      <h2>🔬 Deep Research</h2>
+      <button class="btn secondary" onclick="probeAgent()" style="margin-left:auto;font-size:12px;padding:6px 10px" title="Check what the agent is doing right now">🔍 Probe</button>
+      <button class="btn danger" onclick="flushAgent()" style="font-size:12px;padding:6px 10px" title="Stop the agent and dump context">⏹ Flush</button>
+    </header>
     <div class="page-content">
       <div class="card">
         <h3>Research Query</h3>
@@ -1293,6 +1305,7 @@ _FALLBACK_HTML = """\
         <div class="card">
           <h3>Research Progress</h3>
           <div class="progress-steps" id="research-steps"></div>
+          <div id="research-probe" style="display:none;margin-top:8px;padding:8px 12px;background:var(--bg);border-radius:6px;font-size:12px;color:var(--text-dim);font-family:'SF Mono',Monaco,monospace;white-space:pre-wrap"></div>
         </div>
       </div>
       <div id="research-result" style="display:none">
@@ -2199,19 +2212,34 @@ function send() {
   sendBtn.disabled = true;
 }
 
+function _probeText(data) {
+  let text = '🔍 Agent status: ' + (data.state || 'idle');
+  if (data.tool) text += ' — ' + data.tool + '(' + JSON.stringify(data.params || {}).slice(0, 100) + ')';
+  if (data.iteration) text += ' [iteration ' + data.iteration + ']';
+  if (data.elapsed_seconds) text += ' (' + data.elapsed_seconds + 's ago)';
+  if (data.token_usage) text += '\\nTokens: ' + (data.token_usage.total_tokens || 0).toLocaleString() +
+    ' / ' + (data.token_usage.context_limit || 0).toLocaleString() +
+    ' (' + (data.token_usage.usage_percent || 0) + '%)';
+  return text;
+}
+
+function _showOnActivePage(text, cls) {
+  const researchPage = document.getElementById('page-research');
+  if (researchPage.classList.contains('active')) {
+    const el = document.getElementById('research-probe');
+    el.style.display = 'block';
+    el.textContent = text;
+  } else {
+    addMsg(text, cls || 'tool');
+  }
+}
+
 async function probeAgent() {
   try {
     const res = await fetch('/api/probe');
     const data = await res.json();
-    let text = '🔍 Agent status: ' + (data.state || 'idle');
-    if (data.tool) text += ' — ' + data.tool + '(' + JSON.stringify(data.params || {}).slice(0, 100) + ')';
-    if (data.iteration) text += ' [iteration ' + data.iteration + ']';
-    if (data.elapsed_seconds) text += ' (' + data.elapsed_seconds + 's ago)';
-    if (data.token_usage) text += '\\nTokens: ' + (data.token_usage.total_tokens || 0).toLocaleString() +
-      ' / ' + (data.token_usage.context_limit || 0).toLocaleString() +
-      ' (' + (data.token_usage.usage_percent || 0) + '%)';
-    addMsg(text, 'tool');
-  } catch(e) { addMsg('Probe failed: ' + e, 'tool'); }
+    _showOnActivePage(_probeText(data), 'tool');
+  } catch(e) { _showOnActivePage('Probe failed: ' + e, 'tool'); }
 }
 
 async function flushAgent() {
@@ -2219,10 +2247,13 @@ async function flushAgent() {
   try {
     const res = await fetch('/api/flush', { method: 'POST' });
     const data = await res.json();
-    addMsg('⏹ ' + (data.message || 'Flush requested'), 'tool');
+    const text = '⏹ ' + (data.message || 'Flush requested');
+    _showOnActivePage(text, 'tool');
     sendBtn.disabled = false;
-    inputEl.focus();
-  } catch(e) { addMsg('Flush failed: ' + e, 'tool'); }
+    // Re-enable research button
+    const rbtn = document.getElementById('research-start');
+    if (rbtn) { rbtn.disabled = false; rbtn.textContent = 'Start Research'; }
+  } catch(e) { _showOnActivePage('Flush failed: ' + e, 'tool'); }
 }
 
 async function resetChat() {

@@ -131,6 +131,7 @@ class ResearchSession:
         on_progress: Callback for progress updates (stage, message).
         browser_profile: Browser profile for sub-agents.
         num_agents: Number of sub-agents (default: 5).
+        abort_event: Threading event — set to abort research early.
     """
 
     def __init__(
@@ -139,11 +140,13 @@ class ResearchSession:
         on_progress: Callable[[str, str], None] | None = None,
         browser_profile: str | None = None,
         num_agents: int = NUM_SUB_AGENTS,
+        abort_event: Any = None,
     ) -> None:
         self.query = query
         self.on_progress = on_progress or (lambda s, m: None)
         self.browser_profile = browser_profile
         self.num_agents = num_agents
+        self.abort_event = abort_event
         self.workspace = get_workspace()
         self.research_dir = self.workspace / "research" / f"research_{int(time.time())}"
         self.research_dir.mkdir(parents=True, exist_ok=True)
@@ -354,8 +357,15 @@ class ResearchSession:
         # Step 2: Research each subtopic sequentially
         findings_paths = []
         for i, subtopic in enumerate(subtopics):
+            if self.abort_event and self.abort_event.is_set():
+                self._progress("aborted", "Research aborted by user")
+                break
             path = self.research_subtopic(i, subtopic)
             findings_paths.append(path)
+
+        if self.abort_event and self.abort_event.is_set():
+            # Skip compile, return partial results
+            return self._partial_result(findings_paths, start)
 
         # Step 3: Compile
         report_path = self.compile(findings_paths)
@@ -378,12 +388,36 @@ class ResearchSession:
             "duration_seconds": duration,
         }
 
+    def _partial_result(self, findings_paths: list[str], start: float) -> dict[str, Any]:
+        """Return partial results when research is aborted."""
+        findings_text = ""
+        for i, path in enumerate(findings_paths):
+            try:
+                content = Path(path).read_text()
+            except OSError:
+                content = "*Not found*"
+            findings_text += f"\n### Sub-Agent {i+1}\n\n{content}\n\n---\n"
+
+        report = f"# Research Report (partial — aborted)\n\nQuery: {self.query}\n\n{findings_text}"
+        report_path = self.research_dir / "partial_report.md"
+        report_path.write_text(report)
+
+        return {
+            "query": self.query,
+            "report_path": str(report_path),
+            "report": report,
+            "subtopics": [],
+            "findings_paths": findings_paths,
+            "duration_seconds": time.time() - start,
+        }
+
 
 def run_research(
     query: str,
     on_progress: Callable[[str, str], None] | None = None,
     browser_profile: str | None = None,
     num_agents: int = NUM_SUB_AGENTS,
+    abort_event: Any = None,
 ) -> dict[str, Any]:
     """Convenience function to run a full research session.
 
@@ -392,6 +426,7 @@ def run_research(
         on_progress: Optional progress callback (stage, message).
         browser_profile: Browser profile for sub-agents.
         num_agents: Number of sub-agents (default: 5).
+        abort_event: Threading event to abort research early.
 
     Returns:
         Result dict with report_path, report content, and metadata.
@@ -401,5 +436,6 @@ def run_research(
         on_progress=on_progress,
         browser_profile=browser_profile,
         num_agents=num_agents,
+        abort_event=abort_event,
     )
     return session.run()
