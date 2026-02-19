@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "browser-py"
+version = "0.1.0"
+description = "Lightweight CDP browser control for Python. Connect to your existing Chrome sessions."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Azeruddin Sheik", email = "shaihazher@gmail.com" }]
+keywords = ["browser", "chrome", "cdp", "automation", "devtools", "websocket"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Testing",
+]
+dependencies = ["websockets>=12.0"]
+
+[project.urls]
+Homepage = "https://github.com/shaihazher/browser-py"
+Repository = "https://github.com/shaihazher/browser-py"
+Issues = "https://github.com/shaihazher/browser-py/issues"
+
+[project.scripts]
+browser-py = "browser_py.cli:main"
+bpy = "browser_py.cli:main"
