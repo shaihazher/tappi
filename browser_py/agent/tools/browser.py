@@ -34,11 +34,14 @@ TOOL_SCHEMA = {
                         "search", "elements", "click", "type", "text", "html", "eval",
                         "screenshot", "scroll", "url", "back", "forward",
                         "refresh", "upload", "wait", "profiles",
+                        "create_profile", "switch_profile",
                     ],
                     "description": (
                         "Browser action to perform:\n"
-                        "- launch: Start browser (optional: profile name)\n"
+                        "- launch: Start browser (optional: profile name — creates if needed)\n"
                         "- profiles: List available browser profiles\n"
+                        "- create_profile: Create a new browser profile (requires 'profile')\n"
+                        "- switch_profile: Switch to a different profile and launch it (requires 'profile')\n"
                         "- tabs: List open tabs\n"
                         "- open: Navigate to URL (requires 'url')\n"
                         "- search: Google search — returns clean result links with index numbers (requires 'query')\n"
@@ -127,6 +130,10 @@ class BrowserTool:
                 return self._launch(params.get("profile"))
             if action == "profiles":
                 return self._list_profiles()
+            if action == "create_profile":
+                return self._create_profile(params.get("profile", ""))
+            if action == "switch_profile":
+                return self._switch_profile(params.get("profile", ""))
 
             # All other actions need a browser
             browser = self._get_browser()
@@ -352,6 +359,46 @@ class BrowserTool:
         # Reset initial snapshot for next session
         self.snapshot_tabs()
         return f"Closed {closed} tab(s) opened during this session."
+
+    def _create_profile(self, name: str) -> str:
+        """Create a new browser profile."""
+        if not name:
+            return "Error: 'profile' parameter required. Provide a name like 'personal', 'work', etc."
+        try:
+            get_profile(name)
+            return f"Profile '{name}' already exists. Use action='switch_profile' to switch to it, or action='launch' with profile='{name}' to start it."
+        except ValueError:
+            pass
+        profile = create_profile(name)
+        return f"Profile '{name}' created (port {profile['port']}). Use action='launch' with profile='{name}' to start the browser, then navigate and log in."
+
+    def _switch_profile(self, name: str) -> str:
+        """Switch to a different profile and launch it."""
+        if not name:
+            return "Error: 'profile' parameter required."
+        # Create if it doesn't exist
+        try:
+            get_profile(name)
+        except ValueError:
+            create_profile(name)
+
+        # Disconnect from current browser
+        self._browser = None
+        self._opened_tabs.clear()
+        self._initial_tabs.clear()
+        self._default_profile = name
+
+        # Persist to config so the profile picker and cron jobs pick it up
+        try:
+            from browser_py.agent.config import load_config, save_config
+            cfg = load_config()
+            cfg.setdefault("agent", {})["browser_profile"] = name
+            save_config(cfg)
+        except Exception:
+            pass
+
+        # Launch the new profile
+        return self._launch(name)
 
     def _list_profiles(self) -> str:
         """List available browser profiles."""
