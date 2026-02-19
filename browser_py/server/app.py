@@ -707,7 +707,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 await ws.send_text(json.dumps({"type": "thinking"}))
 
                 loop = asyncio.get_event_loop()
-                _chat_task = loop.create_task(
+                _chat_task = asyncio.ensure_future(
                     loop.run_in_executor(None, agent.chat, msg.get("message", ""))
                 )
                 try:
