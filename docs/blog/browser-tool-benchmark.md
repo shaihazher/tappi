@@ -272,8 +272,17 @@ tappi text
 
 Connect it to your existing Chrome session and give your AI agent the ability to browse the web the way you do — with all your sessions, cookies, and context intact.
 
+**Using [OpenClaw](https://openclaw.ai)?** tappi is available as a ready-to-use agent skill on [ClawHub](https://clawhub.com):
+
+```bash
+clawhub install tappi
+```
+
+One command and your agent has browser superpowers — shadow DOM piercing, coordinate commands, file uploads, and all your signed-in sessions. No config needed.
+
 - 📦 **PyPI:** [tappi](https://pypi.org/project/tappi/)
 - 🐙 **GitHub:** [shaihazher/tappi](https://github.com/shaihazher/tappi)
+- 🧩 **ClawHub:** [tappi](https://clawhub.com/skills/tappi) (OpenClaw skill)
 - 📖 **Docs:** [README](https://github.com/shaihazher/tappi#readme)
 
 ---
