@@ -4,5 +4,6 @@ version = "0.5.1"
 description = "tappi MCP server for Claude Desktop — browser control via CDP"
 requires-python = ">=3.10"
 dependencies = [
-    "tappi[mcp]>=0.5.1",
+    "mcp>=1.0",
+    "websockets>=12.0",
 ]
