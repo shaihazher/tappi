@@ -1,0 +1,73 @@
+{
+  "manifest_version": "0.4",
+  "name": "tappi",
+  "display_name": "tappi — Browser Control",
+  "version": "0.5.0",
+  "description": "Control your browser via Chrome DevTools Protocol. Connects to your existing Chrome — all sessions, cookies, extensions carry over. Pierces shadow DOM. 3-10x fewer tokens than accessibility tree tools.",
+  "long_description": "tappi gives AI agents direct browser control through Chrome DevTools Protocol (CDP). Instead of dumping massive accessibility trees into context, tappi returns compact indexed element lists — the agent says `click 3` instead of parsing a 50K-token ARIA snapshot.\n\n**Key features:**\n- Connects to your existing Chrome — all saved sessions, cookies, and extensions carry over\n- Pierces shadow DOM natively (Gmail, Reddit, GitHub all work)\n- 23 tools: navigate, click, type, extract text, run JavaScript, upload files, screenshot, and more\n- Coordinate commands for cross-origin iframes (captchas, payment forms)\n- 3-10x fewer tokens per interaction than accessibility tree tools\n\n**Requirements:** Chrome/Chromium running with `--remote-debugging-port`. Set the CDP_URL config to point to your Chrome instance.",
+  "author": {
+    "name": "Azeruddin Sheik",
+    "email": "shaihazher@gmail.com",
+    "url": "https://github.com/shaihazher"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shaihazher/tappi.git"
+  },
+  "homepage": "https://github.com/shaihazher/tappi",
+  "documentation": "https://github.com/shaihazher/tappi#mcp-server",
+  "support": "https://github.com/shaihazher/tappi/issues",
+  "server": {
+    "type": "uv",
+    "entry_point": "src/server.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": ["run", "--directory", "${__dirname}", "src/server.py"],
+      "env": {
+        "CDP_URL": "${user_config.cdp_url}"
+      }
+    }
+  },
+  "tools": [
+    { "name": "tappi_open", "description": "Navigate to a URL" },
+    { "name": "tappi_elements", "description": "List interactive elements (numbered, shadow DOM piercing)" },
+    { "name": "tappi_click", "description": "Click element by index" },
+    { "name": "tappi_type", "description": "Type into element by index" },
+    { "name": "tappi_text", "description": "Extract visible page text" },
+    { "name": "tappi_eval", "description": "Run JavaScript in page context" },
+    { "name": "tappi_screenshot", "description": "Capture page screenshot" },
+    { "name": "tappi_tabs", "description": "List open browser tabs" },
+    { "name": "tappi_tab", "description": "Switch to tab by index" },
+    { "name": "tappi_scroll", "description": "Scroll page (up/down/top/bottom)" },
+    { "name": "tappi_upload", "description": "Upload file (bypasses OS dialog)" },
+    { "name": "tappi_click_xy", "description": "Click at coordinates (cross-origin iframes)" },
+    { "name": "tappi_hover_xy", "description": "Hover at coordinates" },
+    { "name": "tappi_drag_xy", "description": "Drag between coordinates" },
+    { "name": "tappi_iframe_rect", "description": "Get iframe bounding box for coordinate targeting" },
+    { "name": "tappi_html", "description": "Get element HTML" },
+    { "name": "tappi_url", "description": "Get current page URL" },
+    { "name": "tappi_back", "description": "Go back in history" },
+    { "name": "tappi_forward", "description": "Go forward in history" },
+    { "name": "tappi_refresh", "description": "Reload page" },
+    { "name": "tappi_newtab", "description": "Open new tab" },
+    { "name": "tappi_close", "description": "Close tab" },
+    { "name": "tappi_wait", "description": "Wait for specified milliseconds" }
+  ],
+  "user_config": {
+    "cdp_url": {
+      "type": "string",
+      "title": "Chrome CDP URL",
+      "description": "URL of your Chrome DevTools Protocol endpoint. Start Chrome with --remote-debugging-port=9222, or use 'tappi launch' to manage profiles.",
+      "required": true,
+      "default": "http://127.0.0.1:9222"
+    }
+  },
+  "keywords": ["browser", "chrome", "cdp", "automation", "web", "scraping", "shadow-dom"],
+  "license": "MIT",
+  "compatibility": {
+    "platforms": ["darwin", "linux", "win32"],
+    "runtimes": {
+      "python": ">=3.10"
+    }
+  }
+}
