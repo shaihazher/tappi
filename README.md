@@ -15,9 +15,7 @@ Think of it as a personal automation assistant with two superpowers: **browser c
 - **Works everywhere.** Linux, macOS, Windows. Python 3.10+. Single `pip install`.
 
 ```bash
-pip install tappi            # CDP library only
-pip install tappi[mcp]       # CDP + MCP server (Claude Desktop, Cursor, etc.)
-pip install tappi[agent]     # CDP + AI agent + all tools
+pip install tappi            # Everything: CDP + MCP server + AI agent
 ```
 
 ---
@@ -42,8 +40,8 @@ pip install tappi[agent]     # CDP + AI agent + all tools
 ## Quick Start
 
 ```bash
-# Install with agent support
-pip install tappi[agent]
+# Install tappi (includes CDP, MCP server, and AI agent)
+pip install tappi
 
 # One-time setup: choose provider, enter API key, set workspace
 bpy setup
@@ -453,13 +451,26 @@ bpy click 5         # Works normally
 
 tappi includes a built-in MCP (Model Context Protocol) server, so you can use it with **Claude Desktop**, **Cursor**, **Windsurf**, **OpenClaw**, or any MCP-compatible AI agent.
 
-### Install
+### Claude Desktop — One-Click Install (.mcpb)
+
+The easiest way to add tappi to Claude Desktop is the **`.mcpb` bundle** — a single file that installs everything:
+
+1. Download [`tappi-0.5.1.mcpb`](https://github.com/shaihazher/tappi/releases/latest) from the latest release
+2. Double-click it — Claude Desktop installs the extension automatically
+3. Start Chrome with `tappi launch` or `--remote-debugging-port=9222`
+4. Ask Claude to browse the web
+
+No `pip install`. No config editing. No Python on your PATH. The bundle includes all source code and dependencies — Claude Desktop manages the runtime via `uv`.
+
+> **See it in action:** [Real Claude Desktop conversation using tappi MCP](https://claude.ai/share/c8a162bd-d35b-4db6-a704-c3bc57ee0498)
+
+### Manual Setup (pip)
+
+If you prefer manual installation or use other MCP clients:
 
 ```bash
-pip install tappi[mcp]
+pip install tappi
 ```
-
-### Claude Desktop
 
 Add to your `claude_desktop_config.json`:
 
@@ -484,7 +495,7 @@ Add to your `claude_desktop_config.json`:
   "mcpServers": {
     "tappi": {
       "command": "uvx",
-      "args": ["tappi[mcp]", "mcp"],
+      "args": ["tappi", "mcp"],
       "env": {
         "CDP_URL": "http://127.0.0.1:9222"
       }
