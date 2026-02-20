@@ -36,6 +36,7 @@ TOOL_SCHEMA = {
                         "refresh", "upload", "wait", "profiles",
                         "create_profile", "switch_profile",
                         "click_xy", "hover_xy", "drag_xy", "iframe_rect",
+                        "keys",
                     ],
                     "description": (
                         "Browser action to perform:\n"
@@ -51,7 +52,8 @@ TOOL_SCHEMA = {
                         "- close_tab: Close tab (optional: 'index', default current)\n"
                         "- elements: List interactive elements (optional: 'selector')\n"
                         "- click: Click element by index (requires 'index')\n"
-                        "- type: Type into element (requires 'index' and 'text')\n"
+                        "- type: Type into a DOM element (requires 'index' and 'text'). "
+                        "NOTE: won't work on canvas-based apps (Google Sheets, Docs, Figma) — use 'keys' instead\n"
                         "- text: Extract visible text (optional: 'selector')\n"
                         "- html: Get element HTML (requires 'selector')\n"
                         "- eval: Run JavaScript (requires 'expression')\n"
@@ -65,7 +67,15 @@ TOOL_SCHEMA = {
                         "- click_xy: Click at page coordinates (requires 'x', 'y'; optional 'double', 'right')\n"
                         "- hover_xy: Hover at page coordinates (requires 'x', 'y')\n"
                         "- drag_xy: Drag between coordinates (requires 'x', 'y', 'x2', 'y2')\n"
-                        "- iframe_rect: Get iframe bounding box for targeting (requires 'selector')"
+                        "- iframe_rect: Get iframe bounding box for targeting (requires 'selector')\n"
+                        "\nRaw keyboard input (for canvas apps: Google Sheets, Docs, Figma):\n"
+                        "- keys: Send raw CDP keyboard events that bypass the DOM (requires 'actions' list). "
+                        "Use for canvas-based apps where 'type' can't reach content areas. "
+                        "Actions list can contain: plain text, key flags (--enter, --tab, --escape, "
+                        "--backspace, --delete, --up, --down, --left, --right), or --combo followed by "
+                        "a key combo (e.g. cmd+b, ctrl+a). Chain freely: "
+                        "[\"Revenue\", \"--tab\", \"Q1\", \"--enter\"]. "
+                        "Navigation elements (menus, toolbars, name box) are still DOM — use click/type for those."
                     ),
                 },
                 "url": {"type": "string", "description": "URL for open/newtab actions"},
@@ -85,6 +95,7 @@ TOOL_SCHEMA = {
                 "y2": {"type": "number", "description": "End Y coordinate for drag_xy"},
                 "double": {"type": "boolean", "description": "Double-click for click_xy"},
                 "right": {"type": "boolean", "description": "Right-click for click_xy"},
+                "actions": {"type": "array", "items": {"type": "string"}, "description": "List of actions for keys: text strings, --flags (--enter, --tab, etc.), or --combo pairs"},
             },
             "required": ["action"],
         },
@@ -287,6 +298,13 @@ class BrowserTool:
             elif action == "wait":
                 ms = int(params.get("ms", 1000))
                 return browser.wait(ms)
+
+            # Raw keyboard input (canvas apps)
+            elif action == "keys":
+                actions_list = params.get("actions", [])
+                if not actions_list:
+                    return "Error: 'actions' parameter required for keys. Provide a list like [\"text\", \"--tab\", \"more text\", \"--enter\"] or [\"--combo\", \"cmd+b\"]."
+                return browser.keys(*actions_list)
 
             # Coordinate commands
             elif action == "click_xy":
