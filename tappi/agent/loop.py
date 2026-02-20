@@ -214,6 +214,7 @@ class Agent:
     def _setup_litellm(self) -> None:
         """Configure LiteLLM with the right provider credentials."""
         import litellm
+        import os as _os  # avoid shadowing module-level os
 
         provider = get_provider()
         key = get_provider_key(provider)
@@ -227,10 +228,10 @@ class Agent:
             pcfg = agent_cfg.get("providers", {}).get(provider, {})
             has_any = False
             for f in info["fields"]:
-                val = pcfg.get(f["key"]) or os.environ.get(f.get("env", ""), "")
+                val = pcfg.get(f["key"]) or _os.environ.get(f.get("env", ""), "")
                 if not val:
                     for alt in f.get("alt_env", []):
-                        val = os.environ.get(alt, "")
+                        val = _os.environ.get(alt, "")
                         if val:
                             break
                 if val:
@@ -251,15 +252,12 @@ class Agent:
             )
 
         # Set the appropriate env vars for LiteLLM
-        import os
-        info = PROVIDERS.get(provider, {})
-
         if provider == "openrouter":
-            os.environ["OPENROUTER_API_KEY"] = key
+            _os.environ["OPENROUTER_API_KEY"] = key
         elif provider in ("anthropic", "claude_max"):
-            os.environ["ANTHROPIC_API_KEY"] = key
+            _os.environ["ANTHROPIC_API_KEY"] = key
         elif provider == "openai":
-            os.environ["OPENAI_API_KEY"] = key
+            _os.environ["OPENAI_API_KEY"] = key
         elif provider == "bedrock":
             # Only set AWS env vars if explicitly configured in tappi settings.
             # If not set, boto3/litellm will use the standard AWS credential chain:
@@ -268,35 +266,35 @@ class Agent:
             agent_cfg = get_agent_config()
             bedrock_cfg = agent_cfg.get("providers", {}).get("bedrock", {})
             if bedrock_cfg.get("aws_access_key_id"):
-                os.environ["AWS_ACCESS_KEY_ID"] = bedrock_cfg["aws_access_key_id"]
+                _os.environ["AWS_ACCESS_KEY_ID"] = bedrock_cfg["aws_access_key_id"]
             if bedrock_cfg.get("aws_secret_access_key"):
-                os.environ["AWS_SECRET_ACCESS_KEY"] = bedrock_cfg["aws_secret_access_key"]
+                _os.environ["AWS_SECRET_ACCESS_KEY"] = bedrock_cfg["aws_secret_access_key"]
             if bedrock_cfg.get("aws_region"):
-                os.environ["AWS_REGION_NAME"] = bedrock_cfg["aws_region"]
-                os.environ["AWS_DEFAULT_REGION"] = bedrock_cfg["aws_region"]
+                _os.environ["AWS_REGION_NAME"] = bedrock_cfg["aws_region"]
+                _os.environ["AWS_DEFAULT_REGION"] = bedrock_cfg["aws_region"]
             if bedrock_cfg.get("aws_profile"):
-                os.environ["AWS_PROFILE"] = bedrock_cfg["aws_profile"]
+                _os.environ["AWS_PROFILE"] = bedrock_cfg["aws_profile"]
         elif provider == "azure":
             agent_cfg = get_agent_config()
             azure_cfg = agent_cfg.get("providers", {}).get("azure", {})
             if azure_cfg.get("api_key"):
-                os.environ["AZURE_API_KEY"] = azure_cfg["api_key"]
+                _os.environ["AZURE_API_KEY"] = azure_cfg["api_key"]
             elif key:
-                os.environ["AZURE_API_KEY"] = key
+                _os.environ["AZURE_API_KEY"] = key
             if azure_cfg.get("base_url"):
-                os.environ["AZURE_API_BASE"] = azure_cfg["base_url"]
+                _os.environ["AZURE_API_BASE"] = azure_cfg["base_url"]
             if azure_cfg.get("api_version"):
-                os.environ["AZURE_API_VERSION"] = azure_cfg["api_version"]
+                _os.environ["AZURE_API_VERSION"] = azure_cfg["api_version"]
         elif provider == "vertex":
             # Set Vertex env vars from config
             agent_cfg = get_agent_config()
             vertex_cfg = agent_cfg.get("providers", {}).get("vertex", {})
             if vertex_cfg.get("credentials_path"):
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = vertex_cfg["credentials_path"]
+                _os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = vertex_cfg["credentials_path"]
             if vertex_cfg.get("project"):
-                os.environ["VERTEXAI_PROJECT"] = vertex_cfg["project"]
+                _os.environ["VERTEXAI_PROJECT"] = vertex_cfg["project"]
             if vertex_cfg.get("location"):
-                os.environ["VERTEXAI_LOCATION"] = vertex_cfg["location"]
+                _os.environ["VERTEXAI_LOCATION"] = vertex_cfg["location"]
 
     def _build_llm_kwargs(self) -> dict:
         """Build common kwargs for LLM calls."""
@@ -324,6 +322,7 @@ class Agent:
             kwargs["reasoning_effort"] = reasoning
 
         # OpenRouter compatibility
+        # Set the appropriate env vars for LiteLLM
         if provider == "openrouter":
             key = get_provider_key(provider)
             kwargs["api_key"] = key
