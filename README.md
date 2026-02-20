@@ -2,14 +2,32 @@
 
 **Your own AI agent that controls a real browser and manages files — running entirely on your machine.**
 
+🌐 **[tappi.synthworx.com](https://tappi.synthworx.com)** — Official home page & docs. Tappi is and will always be fully open source (MIT).
+
 Give it a task in plain English. It opens your browser, navigates pages, clicks buttons, fills forms, reads content, creates PDFs, updates spreadsheets, and schedules recurring jobs. All your logins and cookies carry over. Everything stays local — your data never leaves your machine.
 
 Think of it as a personal automation assistant with two superpowers: **browser control** and **file management**, sandboxed to one directory. Secure enough for work. Powerful enough to replace most browser automation scripts you've ever written.
 
 ### Why tappi?
 
-- **10x more token-efficient** than screenshot-based agents (Operator, Computer Use). Instead of sending full screenshots, tappi indexes interactive elements into a compact numbered list — the LLM says `click 3` instead of parsing pixel coordinates from a 1MB image.
-- **Better LLM decisions.** Numbered elements with semantic labels (`[3] (button) Submit Order`) give the model structured, unambiguous choices. No hallucinated CSS selectors. No coordinate guessing.
+Every AI browser tool today pays a tax — either in tokens or in capability:
+
+- **Screenshot-based agents** (Operator, Computer Use) send full page images to the LLM. The model squints at pixels, guesses coordinates, and prays it clicks the right button. A single interaction can burn 5-10K tokens on vision alone.
+- **DOM/accessibility tree tools** (Playwright MCP, browser tools) dump the entire page structure into context. A single Reddit page can produce 50K+ tokens of nested elements. The LLM reads a novel just to find a button.
+
+Tappi does neither. It indexes interactive elements into a compact numbered list:
+
+```
+[0] (link) Homepage → https://github.com/
+[1] (button) Sign in
+[2] (link) Explore → /explore
+[3] (button) Submit Order
+```
+
+The LLM says `click 3`. Done. **~200 tokens instead of 5-50K.** That's the difference.
+
+- **10x more token-efficient** than both screenshot-based and DOM-dump approaches. Structured element lists give the model exactly what it needs — nothing more.
+- **Better LLM decisions.** Numbered elements with semantic labels (`[3] (button) Submit Order`) are unambiguous. No hallucinated CSS selectors. No coordinate guessing. No wading through thousands of DOM nodes.
 - **Real browser, real sessions.** Connects to Chrome via CDP — your saved logins, cookies, and extensions are all there. Log in once, automate forever.
 - **Sandboxed by design.** One workspace directory. One browser. No filesystem access beyond the sandbox. Safe for corporate environments where you can't install full automation platforms.
 - **Works everywhere.** Linux, macOS, Windows. Python 3.10+. Single `pip install`.
