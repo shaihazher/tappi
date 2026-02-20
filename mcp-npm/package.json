@@ -1,0 +1,33 @@
+{
+  "name": "tappi-mcp",
+  "version": "0.5.0",
+  "description": "MCP server for tappi — browser control via Chrome DevTools Protocol. Connects to your existing Chrome sessions, pierces shadow DOM, 3-10x fewer tokens than accessibility tree tools.",
+  "bin": {
+    "tappi-mcp": "./bin/tappi-mcp.js"
+  },
+  "keywords": [
+    "mcp",
+    "browser",
+    "chrome",
+    "cdp",
+    "automation",
+    "ai",
+    "agent",
+    "claude",
+    "tappi"
+  ],
+  "author": "Azeruddin Sheik <shaihazher@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shaihazher/tappi"
+  },
+  "homepage": "https://github.com/shaihazher/tappi#mcp-server",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin/",
+    "README.md"
+  ]
+}
