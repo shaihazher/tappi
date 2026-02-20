@@ -57,11 +57,13 @@ Like tappi, it connects to an existing Chrome profile, so the agent has access t
 
 The agent has to reason about the entire script upfront, launch a fresh browser instance (no saved cookies or sessions), and hope the script works on the first try. There's no interactive feedback loop — if the page doesn't look like what the agent expected, it finds out only after the script fails.
 
+Playwright *does* support cookie/session injection via `--storage-state` — you can export cookies and localStorage from a real browser session as JSON and pass them at launch. We'll get into why that didn't help (and why it's not the fix people think it is) below.
+
 ### 🔶 playwright-cli
 
 [@playwright/cli](https://github.com/microsoft/playwright-mcp) is Microsoft's new command-line tool, released in early 2026 as a companion to Playwright MCP. It's designed specifically for AI coding agents: instead of writing scripts, the agent calls shell commands like `playwright-cli open "url"`, `playwright-cli snapshot`, `playwright-cli click e5`.
 
-The philosophy is similar to tappi — compact commands, YAML-based snapshots — but it launches its own browser instance (no persistent sessions) and runs headless Chrome by default. It was built to reduce token usage compared to Playwright MCP's full accessibility tree dumps.
+The philosophy is similar to tappi — compact commands, YAML-based snapshots — but it launches its own browser instance (no persistent sessions) and runs headless Chrome by default. Like Playwright scripting, it supports `--storage-state` for cookie injection. It was built to reduce token usage compared to Playwright MCP's full accessibility tree dumps.
 
 ---
 
@@ -79,6 +81,8 @@ The philosophy is similar to tappi — compact commands, YAML-based snapshots �
 | **playwright-cli** 🔶 | Shell commands + YAML snapshots | ❌ Fresh browser, no cookies |
 
 **Key constraint:** Each agent was *forbidden* from switching tools. If their assigned tool couldn't do the job, they reported failure. No bailouts.
+
+**"But Playwright supports `--storage-state`!"** — Yes. Both Playwright and playwright-cli can accept exported cookies/localStorage as a JSON file at launch. We deliberately did *not* use this for the benchmark, and here's why: it tests the tool's *realistic default path*. An AI agent spawned to "go send an email" shouldn't need a pre-built credential pipeline. But more importantly — even *with* injected cookies, Playwright still launches a fresh Chromium instance with default fingerprints, missing service workers, no IndexedDB state, no extension data, and a detectable headless signature. Cookie injection gets you past *some* login pages. It doesn't make a headless browser look real to Reddit's bot detection, and it doesn't give you access to session state stored outside cookies and localStorage. We'll see exactly where this matters in Task 1 and Task 3.
 
 ---
 
@@ -113,7 +117,7 @@ The philosophy is similar to tappi — compact commands, YAML-based snapshots �
 | 🔷 **Playwright** | 14K | 1m02s | ⚠️ Wrong data — captured bot comments on 4/5 posts |
 | 🔶 **playwright-cli** | 21K | 2m22s | ❌ Blocked by Reddit's bot detection |
 
-**The insight:** Playwright *scripting* got through Reddit's bot detection but playwright-cli didn't — same underlying browser engine, different fingerprints. *How* you launch Chromium matters. And tappi's interactive approach (inspect → evaluate → decide) produced fundamentally better output than Playwright's one-shot "write script, pray it works" approach.
+**The insight:** Playwright *scripting* got through Reddit's bot detection but playwright-cli didn't — same underlying browser engine, different fingerprints. *How* you launch Chromium matters. Note that cookie injection via `--storage-state` wouldn't have helped playwright-cli here — Reddit's CAPTCHA triggers on the browser fingerprint, not missing cookies. The request never reaches a page where cookies matter. And tappi's interactive approach (inspect → evaluate → decide) produced fundamentally better output than Playwright's one-shot "write script, pray it works" approach.
 
 ---
 
@@ -177,7 +181,7 @@ The philosophy is similar to tappi — compact commands, YAML-based snapshots �
 | 🔷 **Playwright** | 12K | 26s | ❌ No auth — redirected to Google sign-in |
 | 🔶 **playwright-cli** | 11K | 32s | ❌ No auth — redirected to Google sign-in |
 
-**The insight:** This task exposed two critical fault lines. First, **persistent sessions are non-negotiable** — without them, you can't access any authenticated service. Second, **shadow DOM piercing matters** — Gmail's compose dialog is invisible to accessibility-tree-based tools, but tappi works at the raw DOM level and handles it natively.
+**The insight:** This task exposed two critical fault lines. First, **persistent sessions are non-negotiable** — without them, you can't access any authenticated service. Could `--storage-state` have saved Playwright here? Partially — injecting Google cookies would likely get past the sign-in redirect. But you'd still be in a fresh Chromium instance facing Gmail's shadow DOM compose dialog, with no service workers, no cached state, and a browser fingerprint that Google can distinguish from a real Chrome session. You'd solve the login problem and immediately hit the shadow DOM problem. Second, **shadow DOM piercing matters** — Gmail's compose dialog is invisible to accessibility-tree-based tools, but tappi works at the raw DOM level and handles it natively.
 
 ---
 
@@ -206,7 +210,9 @@ Same model, same thinking level, same instructions. The only variable was the br
 
 Playwright and playwright-cli launch clean browsers. No cookies, no auth, no session state. Every Google service, every authenticated SaaS tool, every site that remembers you — inaccessible. In our test, this caused **4 out of 6** Playwright/playwright-cli runs to either fail outright or return garbage data.
 
-Tools that piggyback on your existing Chrome profile (tappi via CDP, OpenClaw's browser tool) inherit all your signed-in sessions. This isn't a nice-to-have — it's the difference between an agent that can *actually do things* and one that gets stopped at the login page.
+Yes, Playwright supports cookie injection via `--storage-state`. In practice, this means exporting cookies and localStorage from a real browser as JSON, saving them to disk, and passing them on every launch — then re-exporting every time sessions expire, OAuth tokens rotate, or cookies get invalidated. It's a credential maintenance pipeline, not a persistent session. And it only covers cookies and localStorage — not service workers, IndexedDB, extension state, or any of the other session data modern web apps rely on. Even with perfect cookie injection, you're still launching a fresh Chromium with detectable default fingerprints — which is why Reddit CAPTCHA'd playwright-cli regardless.
+
+Tools that piggyback on your existing Chrome profile (tappi via CDP, OpenClaw's browser tool) inherit *everything* — every cookie, every service worker, every IndexedDB entry, every extension, every logged-in tab. Zero setup, zero maintenance, zero expiration headaches. This isn't a nice-to-have — it's the difference between an agent that can *actually do things* and one that gets stopped at the login page.
 
 ### 3. Bot detection kills headless browsers.
 
