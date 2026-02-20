@@ -75,7 +75,10 @@ TOOL_SCHEMA = {
                         "--backspace, --delete, --up, --down, --left, --right), or --combo followed by "
                         "a key combo (e.g. cmd+b, ctrl+a). Chain freely: "
                         "[\"Revenue\", \"--tab\", \"Q1\", \"--enter\"]. "
-                        "Navigation elements (menus, toolbars, name box) are still DOM — use click/type for those."
+                        "Navigation elements (menus, toolbars, name box) are still DOM — use click/type for those. "
+                        "Google Sheets tip: --tab moves between columns, but --enter does NOT "
+                        "reliably advance rows. Navigate to each row start via the Name Box "
+                        "(click it, type cell ref with 'type', press --enter), then --tab within the row."
                     ),
                 },
                 "url": {"type": "string", "description": "URL for open/newtab actions"},

@@ -1007,6 +1007,11 @@ class Browser:
             'Sent: 10 chars + 2 key(s)'
             >>> b.keys("--combo", "cmd+b")
             'Sent: 1 key(s)'
+
+        Google Sheets tip: ``--tab`` moves between columns, but ``--enter``
+        does NOT reliably advance to the next row. Navigate to each row
+        start via the Name Box (click it, type cell ref, press Enter),
+        then use ``--tab`` within the row.
         """
         cdp = self._connect_page()
         try:

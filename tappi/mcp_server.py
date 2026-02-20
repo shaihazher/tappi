@@ -400,7 +400,12 @@ def tappi_keys(actions: list[str]) -> str:
       ["--combo", "cmd+b"]                    Bold (Mac)
       ["--combo", "cmd+a", "--delete"]        Select all + delete
       ["--delay", "50", "slow typing"]        50ms per character
-      ["Hello", "--enter", "World", "--enter"] Multi-line input
+
+    Google Sheets tip: --tab moves between columns within a row, but
+    --enter does NOT reliably advance to the next row. Instead, navigate
+    to each row start via the Name Box (click it with tappi_click, type
+    the cell ref with tappi_type, press --enter to navigate), then use
+    --tab within that row. Pattern: Name Box per row, Tab within rows.
     """
     try:
         b = _get_browser()
