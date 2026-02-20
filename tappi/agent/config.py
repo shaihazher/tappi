@@ -76,6 +76,154 @@ PROVIDERS = {
 }
 
 
+def resolve_provider_credentials(provider: str) -> dict[str, Any]:
+    """Live-resolve credentials for a provider, including file-based sources.
+
+    Unlike get_provider_credentials_status() which only checks config + env vars,
+    this also checks boto3 credential chain, gcloud ADC, Azure CLI, etc.
+
+    Returns:
+        {
+            "resolved": True/False,
+            "source": "config" | "env" | "aws_profile" | "aws_sso" | "aws_credentials_file" | "gcloud_adc" | ...,
+            "details": {...},  # provider-specific
+            "error": "..." | None,
+        }
+    """
+    agent_cfg = get_agent_config()
+    pcfg = agent_cfg.get("providers", {}).get(provider, {})
+
+    if provider == "bedrock":
+        return _resolve_aws_credentials(pcfg)
+    elif provider == "vertex":
+        return _resolve_vertex_credentials(pcfg)
+    elif provider == "azure":
+        return _resolve_azure_credentials(pcfg)
+    else:
+        # Simple API key providers — just check config + env
+        key = get_provider_key(provider)
+        if key:
+            source = "config" if pcfg.get("api_key") else "env"
+            return {"resolved": True, "source": source, "error": None}
+        return {"resolved": False, "source": None, "error": "No API key found"}
+
+
+def _resolve_aws_credentials(pcfg: dict) -> dict[str, Any]:
+    """Resolve AWS credentials through the full boto3 chain."""
+    # Check tappi config first
+    if pcfg.get("aws_access_key_id") and pcfg.get("aws_secret_access_key"):
+        return {
+            "resolved": True,
+            "source": "config",
+            "details": {"region": pcfg.get("aws_region", "not set")},
+            "error": None,
+        }
+
+    # Check env vars
+    if os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY"):
+        return {
+            "resolved": True,
+            "source": "env",
+            "details": {"region": os.environ.get("AWS_DEFAULT_REGION", os.environ.get("AWS_REGION", "not set"))},
+            "error": None,
+        }
+
+    # Try boto3 credential chain (reads ~/.aws/credentials, SSO cache, IMDS, etc.)
+    try:
+        import boto3
+        import botocore.exceptions
+        session = boto3.Session(profile_name=pcfg.get("aws_profile") or None)
+        creds = session.get_credentials()
+        if creds:
+            frozen = creds.get_frozen_credentials()
+            if frozen.access_key:
+                # Determine the source
+                method = getattr(creds, "method", "unknown")
+                # boto3 method names: explicit, env, shared-credentials-file,
+                # sso, assume-role, iam-role, etc.
+                source_map = {
+                    "explicit": "config",
+                    "env": "env",
+                    "shared-credentials-file": "~/.aws/credentials",
+                    "custom-process": "credential_process",
+                    "sso": "AWS SSO",
+                    "assume-role": "assume-role",
+                    "iam-role": "instance-profile",
+                    "container-role": "container-role",
+                }
+                source = source_map.get(method, method)
+                region = session.region_name or "not set"
+                return {
+                    "resolved": True,
+                    "source": source,
+                    "details": {
+                        "region": region,
+                        "access_key_prefix": frozen.access_key[:8] + "...",
+                        "method": method,
+                    },
+                    "error": None,
+                }
+    except ImportError:
+        return {
+            "resolved": False,
+            "source": None,
+            "error": "boto3 not installed — install with: pip install boto3",
+        }
+    except Exception as e:
+        return {
+            "resolved": False,
+            "source": None,
+            "error": f"AWS credential resolution failed: {e}",
+        }
+
+    return {"resolved": False, "source": None, "error": "No AWS credentials found"}
+
+
+def _resolve_vertex_credentials(pcfg: dict) -> dict[str, Any]:
+    """Resolve Google Cloud credentials."""
+    # Config path
+    creds_path = pcfg.get("credentials_path") or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+    if creds_path and Path(creds_path).exists():
+        return {
+            "resolved": True,
+            "source": "service_account" if pcfg.get("credentials_path") else "env (GOOGLE_APPLICATION_CREDENTIALS)",
+            "details": {"path": creds_path, "project": pcfg.get("project", "not set")},
+            "error": None,
+        }
+
+    # Check for Application Default Credentials (gcloud auth application-default login)
+    adc_path = Path.home() / ".config" / "gcloud" / "application_default_credentials.json"
+    if adc_path.exists():
+        return {
+            "resolved": True,
+            "source": "gcloud ADC",
+            "details": {"path": str(adc_path), "project": pcfg.get("project", "not set")},
+            "error": None,
+        }
+
+    return {"resolved": False, "source": None, "error": "No Google Cloud credentials found"}
+
+
+def _resolve_azure_credentials(pcfg: dict) -> dict[str, Any]:
+    """Resolve Azure OpenAI credentials."""
+    key = pcfg.get("api_key") or os.environ.get("AZURE_API_KEY", "")
+    if key:
+        source = "config" if pcfg.get("api_key") else "env"
+        return {"resolved": True, "source": source, "error": None}
+
+    # Check for Azure CLI auth
+    azure_profile = Path.home() / ".azure" / "azureProfile.json"
+    if azure_profile.exists():
+        return {
+            "resolved": True,
+            "source": "Azure CLI",
+            "details": {},
+            "error": None,
+        }
+
+    return {"resolved": False, "source": None, "error": "No Azure credentials found"}
+
+
 def detect_claude_oauth_token() -> str | None:
     """Try to auto-detect Claude Code OAuth token from known locations.
 

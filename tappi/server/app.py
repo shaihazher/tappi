@@ -386,6 +386,25 @@ async def start_research(body: dict) -> JSONResponse:
 # ── Validate API key ──
 
 
+@app.post("/api/credentials/check")
+async def check_credentials(body: dict) -> JSONResponse:
+    """Live-resolve credentials for a provider (checks boto3 chain, ADC, etc.).
+
+    This goes beyond config + env vars — it checks the full credential chain
+    including ~/.aws/credentials, SSO cache, gcloud ADC, and more.
+    """
+    from tappi.agent.config import resolve_provider_credentials
+    import asyncio
+
+    provider = body.get("provider", "")
+    if not provider:
+        return JSONResponse({"error": "provider required"}, status_code=400)
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, resolve_provider_credentials, provider)
+    return JSONResponse(result)
+
+
 @app.post("/api/validate-key")
 async def validate_key(body: dict) -> JSONResponse:
     """Validate an API key by making a minimal API call."""
@@ -2040,10 +2059,21 @@ function renderProviderFields(provider, containerId, credentials, providerFields
       </div>`;
     }).join('');
 
-    // Add resolution order note
-    el.innerHTML += `<p style="font-size:11px;color:var(--text-dim);margin-top:8px;padding:8px;background:var(--bg);border-radius:6px">
-      ⚡ <strong>Resolution order:</strong> Settings page value → environment variable → not set.
-      Values saved here take precedence over env vars.</p>`;
+    // Add resolution order note + credential check button
+    el.innerHTML += `<div style="margin-top:10px;padding:10px;background:var(--bg);border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px">
+        <p style="font-size:11px;color:var(--text-dim);margin:0">
+          ⚡ <strong>Resolution:</strong> tappi config → env var → CLI credentials file (boto3/gcloud/az).
+          Refresh after running <code style="font-size:10px;background:var(--surface);padding:1px 4px;border-radius:3px">ada</code>,
+          <code style="font-size:10px;background:var(--surface);padding:1px 4px;border-radius:3px">aws sso login</code>,
+          <code style="font-size:10px;background:var(--surface);padding:1px 4px;border-radius:3px">gcloud auth</code>, etc.
+        </p>
+      </div>
+      <button class="btn secondary" onclick="checkCredentials('${provider}')" style="padding:6px 14px;font-size:12px;white-space:nowrap" id="cred-check-btn-${provider}">
+        🔄 Check Credentials
+      </button>
+    </div>
+    <div id="cred-check-result-${provider}" style="display:none;margin-top:8px;padding:10px;border-radius:6px;font-size:12px"></div>`;
     return;
   }
 
@@ -2080,6 +2110,59 @@ function renderProviderFields(provider, containerId, credentials, providerFields
     </div>`;
   }
   el.innerHTML = '';
+}
+
+// ── Credential Check ──
+async function checkCredentials(provider) {
+  const btn = document.getElementById('cred-check-btn-' + provider);
+  const resultEl = document.getElementById('cred-check-result-' + provider);
+  if (!btn || !resultEl) return;
+
+  btn.disabled = true;
+  btn.textContent = '🔄 Checking...';
+  resultEl.style.display = 'block';
+  resultEl.style.background = 'rgba(88,166,255,0.08)';
+  resultEl.style.color = 'var(--accent)';
+  resultEl.textContent = 'Resolving credentials...';
+
+  try {
+    const res = await fetch('/api/credentials/check', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ provider }),
+    });
+    const data = await res.json();
+
+    if (data.resolved) {
+      resultEl.style.background = 'rgba(63,185,80,0.1)';
+      resultEl.style.color = 'var(--success)';
+      let text = '✅ Credentials resolved — source: ' + data.source;
+      if (data.details) {
+        const parts = [];
+        if (data.details.region) parts.push('region: ' + data.details.region);
+        if (data.details.access_key_prefix) parts.push('key: ' + data.details.access_key_prefix);
+        if (data.details.method) parts.push('method: ' + data.details.method);
+        if (data.details.project) parts.push('project: ' + data.details.project);
+        if (parts.length) text += ' (' + parts.join(', ') + ')';
+      }
+      resultEl.textContent = text;
+    } else {
+      resultEl.style.background = 'rgba(248,81,73,0.1)';
+      resultEl.style.color = 'var(--danger)';
+      resultEl.textContent = '❌ ' + (data.error || 'No credentials found');
+    }
+
+    // Also refresh the credential status display
+    const cres = await fetch('/api/config');
+    currentCfg = await cres.json();
+  } catch(e) {
+    resultEl.style.background = 'rgba(248,81,73,0.1)';
+    resultEl.style.color = 'var(--danger)';
+    resultEl.textContent = '❌ Check failed: ' + e.message;
+  }
+
+  btn.disabled = false;
+  btn.textContent = '🔄 Check Credentials';
 }
 
 // ── Init ──

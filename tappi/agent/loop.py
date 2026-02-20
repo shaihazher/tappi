@@ -261,7 +261,10 @@ class Agent:
         elif provider == "openai":
             os.environ["OPENAI_API_KEY"] = key
         elif provider == "bedrock":
-            # Set AWS env vars from config (config takes precedence over existing env)
+            # Only set AWS env vars if explicitly configured in tappi settings.
+            # If not set, boto3/litellm will use the standard AWS credential chain:
+            # env vars → ~/.aws/config → ~/.aws/credentials → SSO cache → IMDS
+            # This lets tools like `ada`, `aws sso login`, `saml2aws` work seamlessly.
             agent_cfg = get_agent_config()
             bedrock_cfg = agent_cfg.get("providers", {}).get("bedrock", {})
             if bedrock_cfg.get("aws_access_key_id"):
