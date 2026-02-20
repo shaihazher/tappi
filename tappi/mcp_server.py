@@ -188,9 +188,16 @@ def tappi_click(index: int) -> str:
 
 @mcp.tool()
 def tappi_type(index: int, text: str) -> str:
-    """Type text into an input element by index. Clears existing content first.
+    """Type text into a DOM input element by index. Clears existing content first.
 
     Works with inputs, textareas, contenteditable, and ARIA textboxes.
+
+    NOTE: This targets DOM elements only. Canvas-based apps (Google Sheets,
+    Docs, Slides, Figma) render content on <canvas> — their cell/content
+    areas aren't DOM elements, so tappi_type won't work on them. Use
+    tappi_keys() instead for raw CDP keyboard input in canvas apps.
+    Navigation elements (name box, menus, toolbars) ARE still DOM — use
+    tappi_type for those.
     """
     try:
         b = _get_browser()
@@ -370,20 +377,30 @@ def tappi_wait(ms: int = 1000) -> str:
 
 @mcp.tool()
 def tappi_keys(actions: list[str]) -> str:
-    """Send raw CDP keyboard events (bypasses DOM, works on canvas apps).
+    """Send raw CDP keyboard events — bypasses DOM, works on canvas apps.
 
     Use for canvas-based apps like Google Sheets, Docs, Slides, Figma where
-    tappi_type() can't target canvas content areas. Navigation elements
-    (menus, toolbars) are still DOM — use tappi_click/tappi_type for those.
+    tappi_type() can't target canvas content areas (they render on <canvas>,
+    not DOM elements). Navigation elements (name box, menus, toolbars) are
+    still regular DOM — use tappi_click/tappi_type for those.
 
-    Actions is a list of strings: plain text to type, key flags (--enter,
-    --tab, --escape, --backspace, --delete, --up, --down, --left, --right),
-    or --combo followed by a key combination (e.g. cmd+b, ctrl+a).
+    Actions is a list of strings that get executed in order:
+    - Plain text: typed character by character via CDP keyboard events
+    - Key flags: --enter, --tab, --escape, --backspace, --delete,
+      --up, --down, --left, --right, --home, --end, --space
+    - Key combos: --combo followed by combo string (e.g. cmd+b, ctrl+a,
+      cmd+shift+z). Supports cmd/ctrl/shift/alt modifiers.
+    - Delay: --delay followed by ms (per-character delay, default 10)
 
-    Examples:
-        ["Revenue", "--tab", "Q1", "--tab", "Q2", "--enter"]
-        ["--combo", "cmd+b"]
-        ["--combo", "cmd+a", "--delete"]
+    These can be freely chained in a single call:
+      ["Revenue", "--tab", "Q1", "--tab", "Q2", "--enter"]
+      types "Revenue", presses Tab, types "Q1", presses Tab, types "Q2", presses Enter.
+
+    More examples:
+      ["--combo", "cmd+b"]                    Bold (Mac)
+      ["--combo", "cmd+a", "--delete"]        Select all + delete
+      ["--delay", "50", "slow typing"]        50ms per character
+      ["Hello", "--enter", "World", "--enter"] Multi-line input
     """
     try:
         b = _get_browser()

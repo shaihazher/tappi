@@ -523,7 +523,7 @@ class Browser:
             cdp.close()
 
     def type(self, index: int, text: str) -> str:
-        """Type text into an element by its index number.
+        """Type text into a DOM element by its index number.
 
         Clears existing content first, then types. Works with:
         - Regular <input> and <textarea> elements
@@ -531,6 +531,11 @@ class Browser:
         - Elements with role="textbox"
 
         Dispatches proper input/change events for React/Vue/Angular.
+
+        Note: This targets DOM elements only. Canvas-based apps (Google
+        Sheets, Docs, Slides, Figma) render content on <canvas> — use
+        keys() instead for those. Navigation elements (name box, menus,
+        toolbars) are still DOM and work fine with type().
 
         Args:
             index: Element index from elements() output.
