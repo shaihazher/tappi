@@ -1,8 +1,8 @@
 [project]
 name = "tappi-mcpb"
-version = "0.5.0"
+version = "0.5.1"
 description = "tappi MCP server for Claude Desktop — browser control via CDP"
 requires-python = ">=3.10"
 dependencies = [
-    "tappi[mcp]>=0.5.0",
+    "tappi[mcp]>=0.5.1",
 ]

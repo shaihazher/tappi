@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "tappi",
   "display_name": "tappi — Browser Control",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Control your browser via Chrome DevTools Protocol. Connects to your existing Chrome — all sessions, cookies, extensions carry over. Pierces shadow DOM. 3-10x fewer tokens than accessibility tree tools.",
   "long_description": "tappi gives AI agents direct browser control through Chrome DevTools Protocol (CDP). Instead of dumping massive accessibility trees into context, tappi returns compact indexed element lists — the agent says `click 3` instead of parsing a 50K-token ARIA snapshot.\n\n**Key features:**\n- Connects to your existing Chrome — all saved sessions, cookies, and extensions carry over\n- Pierces shadow DOM natively (Gmail, Reddit, GitHub all work)\n- 23 tools: navigate, click, type, extract text, run JavaScript, upload files, screenshot, and more\n- Coordinate commands for cross-origin iframes (captchas, payment forms)\n- 3-10x fewer tokens per interaction than accessibility tree tools\n\n**Requirements:** Chrome/Chromium running with `--remote-debugging-port`. Set the CDP_URL config to point to your Chrome instance.",
   "author": {
