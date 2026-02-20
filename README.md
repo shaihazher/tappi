@@ -40,6 +40,7 @@ pip install tappi            # Everything: CDP + MCP server + AI agent
 
 ## Table of Contents
 
+- [Installation](#installation)
 - [Quick Start](#quick-start)
 - [AI Agent Mode](#ai-agent-mode) ← **New**
 - [Web UI](#web-ui) ← **New**
@@ -55,23 +56,178 @@ pip install tappi            # Everything: CDP + MCP server + AI agent
 
 ---
 
-## Quick Start
+## Installation
+
+### One-Line Installer (recommended)
+
+Downloads Python if needed, creates a virtual environment, installs tappi, and drops a **"Launch tappi"** shortcut on your Desktop. Inspect the scripts first if you like — they're [in the repo](install/).
+
+**macOS:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/shaihazher/tappi/main/install/install-macos.sh | bash
+```
+
+**Linux (Debian/Ubuntu, Fedora, Arch):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/shaihazher/tappi/main/install/install-linux.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/shaihazher/tappi/main/install/install-windows.ps1 | iex
+```
+
+After install, double-click **"Launch tappi"** on your Desktop — it starts the browser, launches the web UI, and opens it automatically. Pick your AI provider and API key in the Settings page on first launch.
+
+### Manual Install (with venv)
+
+If you prefer to set things up yourself. Requires Python 3.10+.
+
+<details>
+<summary><b>macOS</b></summary>
 
 ```bash
-# Install tappi (includes CDP, MCP server, and AI agent)
+# Install Python 3.13 (skip if you already have 3.10+)
+brew install python@3.13
+
+# Create and activate a virtual environment
+python3.13 -m venv ~/.tappi-venv
+source ~/.tappi-venv/bin/activate
+
+# Install tappi
+pip install --upgrade pip
 pip install tappi
 
-# One-time setup: choose provider, enter API key, set workspace
-bpy setup
+# Verify
+bpy --version
+```
 
-# Launch a browser
-bpy launch
+To auto-activate on every new terminal, add to your `~/.zshrc` (or `~/.bash_profile`):
+```bash
+source ~/.tappi-venv/bin/activate
+```
 
-# Chat with the agent
+</details>
+
+<details>
+<summary><b>Linux (Debian/Ubuntu)</b></summary>
+
+```bash
+# Install Python 3.13 and venv (skip if you already have 3.10+)
+sudo apt update
+sudo apt install -y python3 python3-pip python3-venv
+
+# Create and activate a virtual environment
+python3 -m venv ~/.tappi-venv
+source ~/.tappi-venv/bin/activate
+
+# Install tappi
+pip install --upgrade pip
+pip install tappi
+
+# Verify
+bpy --version
+```
+
+To auto-activate on every new terminal, add to your `~/.bashrc`:
+```bash
+source ~/.tappi-venv/bin/activate
+```
+
+</details>
+
+<details>
+<summary><b>Linux (Fedora/RHEL)</b></summary>
+
+```bash
+# Install Python 3.13 (skip if you already have 3.10+)
+sudo dnf install -y python3 python3-pip
+
+# Create and activate a virtual environment
+python3 -m venv ~/.tappi-venv
+source ~/.tappi-venv/bin/activate
+
+# Install tappi
+pip install --upgrade pip
+pip install tappi
+
+# Verify
+bpy --version
+```
+
+</details>
+
+<details>
+<summary><b>Linux (Arch)</b></summary>
+
+```bash
+# Install Python (skip if you already have 3.10+)
+sudo pacman -Sy python python-pip
+
+# Create and activate a virtual environment
+python -m venv ~/.tappi-venv
+source ~/.tappi-venv/bin/activate
+
+# Install tappi
+pip install --upgrade pip
+pip install tappi
+
+# Verify
+bpy --version
+```
+
+</details>
+
+<details>
+<summary><b>Windows</b></summary>
+
+```powershell
+# Install Python 3.13 (skip if you already have 3.10+)
+winget install Python.Python.3.13
+
+# Create and activate a virtual environment
+python -m venv $env:USERPROFILE\.tappi-venv
+& "$env:USERPROFILE\.tappi-venv\Scripts\Activate.ps1"
+
+# Install tappi
+pip install --upgrade pip
+pip install tappi
+
+# Verify
+bpy --version
+```
+
+To auto-activate on every new terminal, add to your PowerShell profile (`notepad $PROFILE`):
+```powershell
+. "$env:USERPROFILE\.tappi-venv\Scripts\Activate.ps1"
+```
+
+</details>
+
+### Quick Install (no venv)
+
+If you just want to get going and don't care about virtual environments:
+
+```bash
+pip install tappi
+```
+
+---
+
+## Quick Start
+
+If you used the one-line installer, just double-click **"Launch tappi"** on your Desktop. Done.
+
+From the terminal:
+
+```bash
+# Launch browser + web UI (opens http://127.0.0.1:8321)
+bpy launch && bpy serve
+
+# Or use the CLI agent directly
+bpy setup                    # one-time: pick provider + API key
+bpy launch                   # start the browser
 bpy agent "Go to github.com and find today's trending Python repos"
-
-# Or use the web UI
-bpy serve
 ```
 
 ---
