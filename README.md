@@ -77,7 +77,7 @@ curl -fsSL https://raw.githubusercontent.com/shaihazher/tappi/main/install/insta
 irm https://raw.githubusercontent.com/shaihazher/tappi/main/install/install-windows.ps1 | iex
 ```
 
-After install, double-click **"Launch tappi"** on your Desktop — it starts the browser, launches the web UI, and opens it automatically. Pick your AI provider and API key in the Settings page on first launch.
+After install, double-click **"Launch tappi"** on your Desktop — it starts the browser, launches the web UI, and opens it automatically. Pick your AI provider and API key in the Settings page on first launch. See the [Web UI Tutorial](docs/blog/tappi-web-ui-tutorial.md) for a visual walkthrough.
 
 ### Manual Install (with venv)
 
@@ -379,6 +379,8 @@ bpy agent "Remove job abc123"
 bpy serve                    # http://127.0.0.1:8321
 bpy serve --port 9000        # custom port
 ```
+
+📖 **[Full visual walkthrough →](docs/blog/tappi-web-ui-tutorial.md)**
 
 The web UI has 4 sections:
 
