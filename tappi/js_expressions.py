@@ -142,20 +142,21 @@ def check_indexed_js() -> str:
 
 
 def click_info_js(index: int) -> str:
-    """Get element info and position for clicking."""
+    """Click element via JS events — more reliable than CDP mouse for SPAs."""
     return f"""
     (() => {{
       const el = (window.__bpyDeepQuery && window.__bpyDeepQuery({index})) || document.querySelector('[data-bpy-idx="{index}"]');
       if (!el) return JSON.stringify({{ error: 'Element [{index}] not found. Run: elements' }});
       el.scrollIntoView({{ block: 'center' }});
       const rect = el.getBoundingClientRect();
+      const cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2;
+      const mOpts = {{ bubbles: true, cancelable: true, clientX: cx, clientY: cy, button: 0 }};
+      el.dispatchEvent(new MouseEvent('mousedown', mOpts));
+      el.dispatchEvent(new MouseEvent('mouseup', mOpts));
+      el.click();
       const label = (el.getAttribute('role') || el.tagName.toLowerCase());
       const desc = (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 80);
-      return JSON.stringify({{
-        x: rect.x + rect.width / 2,
-        y: rect.y + rect.height / 2,
-        label, desc
-      }});
+      return JSON.stringify({{ label, desc }});
     }})()
     """
 

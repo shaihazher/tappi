@@ -489,8 +489,9 @@ class Browser:
     def click(self, index: int) -> str:
         """Click an element by its index number.
 
-        Uses real mouse events (mousePressed + mouseReleased) via CDP,
-        which triggers React/Vue/Angular event handlers properly.
+        Uses JS mouse events (mousedown + mouseup + click) dispatched
+        directly on the element — more reliable than CDP Input.dispatchMouseEvent
+        for SPAs (Angular, React, Vue).
 
         Elements are auto-indexed if not already — you can call click()
         right after open() without calling elements() first.
@@ -517,14 +518,6 @@ class Browser:
             if "error" in info:
                 raise CDPError(info["error"])
 
-            opts = {
-                "x": info["x"],
-                "y": info["y"],
-                "button": "left",
-                "clickCount": 1,
-            }
-            cdp.send("Input.dispatchMouseEvent", type="mousePressed", **opts)
-            cdp.send("Input.dispatchMouseEvent", type="mouseReleased", **opts)
             return f"Clicked: ({info['label']}) {info['desc']}"
         finally:
             cdp.close()
