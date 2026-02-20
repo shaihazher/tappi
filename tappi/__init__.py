@@ -16,5 +16,5 @@ Quick start:
 
 from tappi.core import Browser, CDPSession
 
-__version__ = "0.4.1"
+__version__ = "0.5.0"
 __all__ = ["Browser", "CDPSession"]

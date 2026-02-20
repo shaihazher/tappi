@@ -16,6 +16,7 @@ Think of it as a personal automation assistant with two superpowers: **browser c
 
 ```bash
 pip install tappi            # CDP library only
+pip install tappi[mcp]       # CDP + MCP server (Claude Desktop, Cursor, etc.)
 pip install tappi[agent]     # CDP + AI agent + all tools
 ```
 
@@ -32,6 +33,7 @@ pip install tappi[agent]     # CDP + AI agent + all tools
 - [CLI Reference](#cli-reference)
 - [Profiles](#profiles)
 - [Shadow DOM Support](#shadow-dom-support)
+- [MCP Server](#mcp-server) ← **New**
 - [FAQ](#faq)
 - [License](#license)
 
@@ -444,6 +446,140 @@ bpy click 5         # Works normally
 | `ANTHROPIC_API_KEY` | Anthropic/Claude Max key | (from config) |
 | `OPENROUTER_API_KEY` | OpenRouter key | (from config) |
 | `OPENAI_API_KEY` | OpenAI key | (from config) |
+
+---
+
+## MCP Server
+
+tappi includes a built-in MCP (Model Context Protocol) server, so you can use it with **Claude Desktop**, **Cursor**, **Windsurf**, **OpenClaw**, or any MCP-compatible AI agent.
+
+### Install
+
+```bash
+pip install tappi[mcp]
+```
+
+### Claude Desktop
+
+Add to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "tappi": {
+      "command": "tappi",
+      "args": ["mcp"],
+      "env": {
+        "CDP_URL": "http://127.0.0.1:9222"
+      }
+    }
+  }
+}
+```
+
+**Don't want to install anything?** Use `uvx` (comes with [uv](https://docs.astral.sh/uv/)):
+
+```json
+{
+  "mcpServers": {
+    "tappi": {
+      "command": "uvx",
+      "args": ["tappi[mcp]", "mcp"],
+      "env": {
+        "CDP_URL": "http://127.0.0.1:9222"
+      }
+    }
+  }
+}
+```
+
+**Prefer npm?** There's a thin wrapper that delegates to the Python server:
+
+```bash
+npx tappi-mcp
+```
+
+Claude Desktop config with npx:
+
+```json
+{
+  "mcpServers": {
+    "tappi": {
+      "command": "npx",
+      "args": ["tappi-mcp"],
+      "env": {
+        "CDP_URL": "http://127.0.0.1:9222"
+      }
+    }
+  }
+}
+```
+
+### Cursor / Windsurf
+
+Same config format — add the `tappi` server to your MCP settings with the command above.
+
+### OpenClaw
+
+tappi is available as an [OpenClaw](https://openclaw.ai) skill on [ClawHub](https://clawhub.com):
+
+```bash
+clawhub install tappi
+```
+
+### HTTP/SSE Transport
+
+For MCP clients that prefer HTTP instead of stdio:
+
+```bash
+tappi mcp --sse                    # default: 127.0.0.1:8377
+tappi mcp --sse --port 9000        # custom port
+```
+
+### Available Tools
+
+The MCP server exposes 23 tools:
+
+| Tool | Description |
+|------|-------------|
+| `tappi_open` | Navigate to a URL |
+| `tappi_elements` | List interactive elements (numbered, shadow DOM piercing) |
+| `tappi_click` | Click element by index |
+| `tappi_type` | Type into element by index |
+| `tappi_text` | Extract visible page text |
+| `tappi_eval` | Run JavaScript in page context |
+| `tappi_screenshot` | Capture page screenshot |
+| `tappi_tabs` | List open tabs |
+| `tappi_tab` | Switch tab |
+| `tappi_scroll` | Scroll page |
+| `tappi_upload` | Upload file (bypasses OS dialog) |
+| `tappi_click_xy` | Click at coordinates (cross-origin iframes) |
+| `tappi_iframe_rect` | Get iframe bounding box |
+| ... and 10 more | `newtab`, `close`, `url`, `back`, `forward`, `refresh`, `html`, `hover_xy`, `drag_xy`, `wait` |
+
+### How It's Different
+
+Unlike Playwright MCP or browser tool ARIA snapshots, tappi's MCP server:
+
+- **Connects to your existing Chrome** — all sessions, cookies, extensions carry over
+- **Pierces shadow DOM** — Gmail, Reddit, GitHub all work natively
+- **Returns compact indexed output** — `[3] (button) Submit` instead of a 50K-token accessibility tree
+- **Uses 3-10x fewer tokens** per interaction
+- **No headless browser** — runs in your real Chrome, invisible to bot detection
+
+### Prerequisites
+
+Start Chrome with remote debugging enabled:
+
+```bash
+# Option 1: tappi launch (manages profiles for you)
+tappi launch
+
+# Option 2: Manual
+google-chrome --remote-debugging-port=9222
+```
+
+Set `CDP_URL` in your MCP config to point to your Chrome instance (default: `http://127.0.0.1:9222`).
 
 ---
 

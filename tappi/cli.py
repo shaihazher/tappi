@@ -298,6 +298,8 @@ def print_main_help() -> None:
                 ("agent [message]", "Chat with the agent (interactive or one-shot)"),
                 ("research <query>", "Deep research with 5 sub-agents"),
                 ("serve [--port 8321]", "Start the web UI"),
+                ("mcp", "Start MCP server (stdio, for Claude Desktop)"),
+                ("mcp --sse", "Start MCP server (HTTP/SSE, port 8377)"),
             ],
         ),
         (
@@ -880,6 +882,13 @@ def main() -> None:
 
         if cmd == "serve":
             run_serve(cmd_args)
+            return
+
+        if cmd == "mcp":
+            from tappi.mcp_server import main as mcp_main
+            # Pass remaining args through
+            sys.argv = ["tappi-mcp"] + cmd_args
+            mcp_main()
             return
 
         # Launch doesn't need an existing browser connection
