@@ -42,12 +42,12 @@ PROVIDERS = {
     "bedrock": {
         "name": "AWS Bedrock",
         "env_key": "AWS_ACCESS_KEY_ID",
-        "default_model": "bedrock/anthropic.claude-sonnet-4-6-v1:0",
-        "note": "Uses AWS credentials. Configure Access Key + Secret Key + Region, or use env vars / AWS CLI profile.",
+        "default_model": "bedrock/us.anthropic.claude-sonnet-4-6-v1:0",
+        "note": "Uses AWS credentials. Tappi reads from config first, then falls back to environment variables. You can also use an AWS CLI named profile.",
         "fields": [
             {"key": "aws_access_key_id", "label": "AWS Access Key ID", "env": "AWS_ACCESS_KEY_ID", "secret": True},
             {"key": "aws_secret_access_key", "label": "AWS Secret Access Key", "env": "AWS_SECRET_ACCESS_KEY", "secret": True},
-            {"key": "aws_region", "label": "AWS Region", "env": "AWS_REGION_NAME", "placeholder": "us-east-1"},
+            {"key": "aws_region", "label": "AWS Region", "env": "AWS_DEFAULT_REGION", "placeholder": "us-east-1", "alt_env": ["AWS_REGION_NAME", "AWS_REGION"]},
             {"key": "aws_profile", "label": "AWS Profile (optional)", "env": "AWS_PROFILE", "placeholder": "default"},
         ],
     },
@@ -57,16 +57,16 @@ PROVIDERS = {
         "default_model": "azure/gpt-4o",
         "note": "Requires API key, endpoint URL, and API version from your Azure OpenAI resource.",
         "fields": [
-            {"key": "api_key", "label": "API Key", "secret": True},
-            {"key": "base_url", "label": "Endpoint URL", "placeholder": "https://your-resource.openai.azure.com"},
-            {"key": "api_version", "label": "API Version", "placeholder": "2024-02-01"},
+            {"key": "api_key", "label": "API Key", "env": "AZURE_API_KEY", "secret": True},
+            {"key": "base_url", "label": "Endpoint URL", "env": "AZURE_API_BASE", "placeholder": "https://your-resource.openai.azure.com"},
+            {"key": "api_version", "label": "API Version", "env": "AZURE_API_VERSION", "placeholder": "2024-02-01"},
         ],
     },
     "vertex": {
         "name": "Google Vertex AI",
         "env_key": "GOOGLE_APPLICATION_CREDENTIALS",
         "default_model": "vertex_ai/gemini-2.0-flash",
-        "note": "Uses Google Cloud auth. Set credentials file path + project ID, or use gcloud CLI auth.",
+        "note": "Uses Google Cloud auth. Set credentials file path + project ID, or use gcloud CLI / ADC auth.",
         "fields": [
             {"key": "credentials_path", "label": "Service Account JSON Path", "env": "GOOGLE_APPLICATION_CREDENTIALS", "placeholder": "/path/to/service-account.json"},
             {"key": "project", "label": "Project ID", "env": "VERTEXAI_PROJECT", "placeholder": "my-gcp-project"},
@@ -209,17 +209,30 @@ def get_provider_credentials_status() -> dict[str, Any]:
             any_configured = False
             for f in fields:
                 fkey = f["key"]
-                val = pcfg.get(fkey) or os.environ.get(f.get("env", ""), "")
+                # Check config first
+                config_val = pcfg.get(fkey, "")
+                # Check primary env var, then alt_env vars
+                env_val = ""
+                env_source_name = f.get("env", "")
+                if env_source_name:
+                    env_val = os.environ.get(env_source_name, "")
+                if not env_val:
+                    for alt in f.get("alt_env", []):
+                        env_val = os.environ.get(alt, "")
+                        if env_val:
+                            env_source_name = alt
+                            break
+                val = config_val or env_val
                 if val:
                     any_configured = True
-                    source = "config" if pcfg.get(fkey) else "env"
+                    source = "config" if config_val else f"env ({env_source_name})"
                     if f.get("secret"):
                         masked = val[:4] + "..." + val[-4:] if len(val) > 10 else "***"
                     else:
                         masked = val
                     field_status[fkey] = {"configured": True, "masked": masked, "source": source}
                 else:
-                    field_status[fkey] = {"configured": False}
+                    field_status[fkey] = {"configured": False, "env_var": env_source_name}
             result[pkey] = {"configured": any_configured, "fields": field_status}
         else:
             # Single API key provider

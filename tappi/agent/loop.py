@@ -217,9 +217,33 @@ class Agent:
 
         provider = get_provider()
         key = get_provider_key(provider)
+        info = PROVIDERS.get(provider, {})
 
-        if not key:
-            info = PROVIDERS.get(provider, {})
+        # Multi-field providers (Bedrock, Azure, Vertex) don't need a single API key —
+        # they use env vars or config fields. Only error if no credentials at all.
+        if not key and info.get("fields"):
+            # Check if ANY field is configured (config or env)
+            agent_cfg = get_agent_config()
+            pcfg = agent_cfg.get("providers", {}).get(provider, {})
+            has_any = False
+            for f in info["fields"]:
+                val = pcfg.get(f["key"]) or os.environ.get(f.get("env", ""), "")
+                if not val:
+                    for alt in f.get("alt_env", []):
+                        val = os.environ.get(alt, "")
+                        if val:
+                            break
+                if val:
+                    has_any = True
+                    break
+            if not has_any:
+                env_vars = ", ".join(f.get("env", "") for f in info["fields"] if f.get("env"))
+                raise ValueError(
+                    f"No credentials found for {provider}.\n"
+                    f"Set them via: bpy setup\n"
+                    f"Or env vars: {env_vars}"
+                )
+        elif not key:
             raise ValueError(
                 f"No API key found for {provider}.\n"
                 f"Set it via: bpy setup\n"
@@ -237,19 +261,39 @@ class Agent:
         elif provider == "openai":
             os.environ["OPENAI_API_KEY"] = key
         elif provider == "bedrock":
-            # Bedrock uses AWS env vars — assume they're set
-            pass
+            # Set AWS env vars from config (config takes precedence over existing env)
+            agent_cfg = get_agent_config()
+            bedrock_cfg = agent_cfg.get("providers", {}).get("bedrock", {})
+            if bedrock_cfg.get("aws_access_key_id"):
+                os.environ["AWS_ACCESS_KEY_ID"] = bedrock_cfg["aws_access_key_id"]
+            if bedrock_cfg.get("aws_secret_access_key"):
+                os.environ["AWS_SECRET_ACCESS_KEY"] = bedrock_cfg["aws_secret_access_key"]
+            if bedrock_cfg.get("aws_region"):
+                os.environ["AWS_REGION_NAME"] = bedrock_cfg["aws_region"]
+                os.environ["AWS_DEFAULT_REGION"] = bedrock_cfg["aws_region"]
+            if bedrock_cfg.get("aws_profile"):
+                os.environ["AWS_PROFILE"] = bedrock_cfg["aws_profile"]
         elif provider == "azure":
-            os.environ["AZURE_API_KEY"] = key
             agent_cfg = get_agent_config()
             azure_cfg = agent_cfg.get("providers", {}).get("azure", {})
+            if azure_cfg.get("api_key"):
+                os.environ["AZURE_API_KEY"] = azure_cfg["api_key"]
+            elif key:
+                os.environ["AZURE_API_KEY"] = key
             if azure_cfg.get("base_url"):
                 os.environ["AZURE_API_BASE"] = azure_cfg["base_url"]
             if azure_cfg.get("api_version"):
                 os.environ["AZURE_API_VERSION"] = azure_cfg["api_version"]
         elif provider == "vertex":
-            # Vertex uses GOOGLE_APPLICATION_CREDENTIALS
-            pass
+            # Set Vertex env vars from config
+            agent_cfg = get_agent_config()
+            vertex_cfg = agent_cfg.get("providers", {}).get("vertex", {})
+            if vertex_cfg.get("credentials_path"):
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = vertex_cfg["credentials_path"]
+            if vertex_cfg.get("project"):
+                os.environ["VERTEXAI_PROJECT"] = vertex_cfg["project"]
+            if vertex_cfg.get("location"):
+                os.environ["VERTEXAI_LOCATION"] = vertex_cfg["location"]
 
     def _build_llm_kwargs(self) -> dict:
         """Build common kwargs for LLM calls."""

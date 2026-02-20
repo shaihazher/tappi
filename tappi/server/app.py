@@ -629,6 +629,7 @@ async def list_providers() -> JSONResponse:
             "default_model": info["default_model"],
             "note": info.get("note", ""),
             "is_oauth": info.get("is_oauth", False),
+            "env_key": info.get("env_key", ""),
         }
         if info.get("fields"):
             entry["fields"] = info["fields"]
@@ -2002,12 +2003,29 @@ function renderProviderFields(provider, containerId, credentials, providerFields
   const creds = (credentials || {})[provider] || {};
 
   if (info.fields) {
-    // Multi-field provider
+    // Multi-field provider — show env var hints and detection status
     el.innerHTML = info.fields.map(f => {
       const fieldCred = (creds.fields || {})[f.key] || {};
-      const statusHtml = fieldCred.configured
-        ? `<div class="key-status configured">✓ Configured (${fieldCred.masked}) — ${fieldCred.source}</div>`
-        : `<div class="key-status missing">Not configured</div>`;
+      const envVar = f.env || '';
+      const altEnvs = f.alt_env || [];
+      const allEnvs = [envVar, ...altEnvs].filter(Boolean);
+      const envHint = allEnvs.length
+        ? `<span style="font-size:10px;color:var(--text-dim);margin-left:4px">env: ${allEnvs.map(e => '$' + e).join(' / ')}</span>`
+        : '';
+
+      let statusHtml = '';
+      if (fieldCred.configured) {
+        const sourceLabel = fieldCred.source.startsWith('env')
+          ? '🌐 ' + fieldCred.source  // "env (AWS_DEFAULT_REGION)"
+          : '💾 ' + fieldCred.source;  // "config"
+        statusHtml = `<div class="key-status configured">✓ ${fieldCred.masked} — ${sourceLabel}</div>`;
+      } else {
+        const envName = fieldCred.env_var || envVar;
+        statusHtml = envName
+          ? `<div class="key-status missing">Not set — provide below or set <code style="font-size:10px;background:var(--bg);padding:1px 4px;border-radius:3px">$${envName}</code></div>`
+          : `<div class="key-status missing">Not configured</div>`;
+      }
+
       const inputType = f.secret ? 'password' : 'text';
       const placeholder = fieldCred.configured
         ? 'Leave empty to keep current'
@@ -2016,11 +2034,16 @@ function renderProviderFields(provider, containerId, credentials, providerFields
       const prefill = !f.secret && providerFields && providerFields[provider]
         ? (providerFields[provider][f.key] || '') : '';
       return `<div class="field">
-        <label>${f.label}</label>
+        <label>${f.label} ${envHint}</label>
         <input type="${inputType}" data-field-key="${f.key}" placeholder="${placeholder}" value="${prefill}" autocomplete="off">
         ${statusHtml}
       </div>`;
     }).join('');
+
+    // Add resolution order note
+    el.innerHTML += `<p style="font-size:11px;color:var(--text-dim);margin-top:8px;padding:8px;background:var(--bg);border-radius:6px">
+      ⚡ <strong>Resolution order:</strong> Settings page value → environment variable → not set.
+      Values saved here take precedence over env vars.</p>`;
     return;
   }
 
@@ -2029,18 +2052,28 @@ function renderProviderFields(provider, containerId, credentials, providerFields
   if (keySection) {
     const isOauth = info.is_oauth;
     const label = isOauth ? 'OAuth Token' : 'API Key';
+    const envVar = info.env_key || '';
+    const envHint = envVar ? `<span style="font-size:10px;color:var(--text-dim);margin-left:4px">env: $${envVar}</span>` : '';
     const placeholder = creds.configured
       ? 'Leave empty to keep current'
       : (isOauth ? 'sk-ant-oat01-...' : 'sk-...');
-    const statusHtml = creds.configured
-      ? `<div class="key-status configured">✓ Configured (${creds.masked}) — from ${creds.source}</div>`
-      : `<div class="key-status missing">Not configured</div>`;
+
+    let statusHtml = '';
+    if (creds.configured) {
+      const sourceIcon = creds.source === 'env' ? '🌐' : '💾';
+      statusHtml = `<div class="key-status configured">✓ ${creds.masked} — ${sourceIcon} ${creds.source}</div>`;
+    } else {
+      statusHtml = envVar
+        ? `<div class="key-status missing">Not set — provide below or set <code style="font-size:10px;background:var(--bg);padding:1px 4px;border-radius:3px">$${envVar}</code></div>`
+        : `<div class="key-status missing">Not configured</div>`;
+    }
+
     const hint = isOauth
       ? '<p style="font-size:11px;color:var(--text-dim);margin-top:4px">From your Claude Max/Pro subscription. Same token Claude Code uses.</p>'
       : '';
 
     keySection.innerHTML = `<div class="field">
-      <label>${label}</label>
+      <label>${label} ${envHint}</label>
       <input type="password" id="${containerId.replace('provider-fields','key')}" placeholder="${placeholder}" autocomplete="off">
       ${statusHtml}
       ${hint}
@@ -2291,15 +2324,21 @@ async function onSetupProviderChange() {
     const isOauth = info.is_oauth;
     const creds = (currentCfg.credentials || {})[p] || {};
     const label = isOauth ? 'OAuth Token' : 'API Key';
+    const envVar = info.env_key || '';
+    const envHint = envVar ? `<span style="font-size:10px;color:var(--text-dim);margin-left:4px">env: $${envVar}</span>` : '';
     const placeholder = creds.configured ? 'Leave empty to keep current' : (isOauth ? 'sk-ant-oat01-...' : 'sk-...');
-    const statusHtml = creds.configured
-      ? `<div class="key-status configured">✓ Configured (${creds.masked}) — from ${creds.source}</div>`
-      : '';
+    let statusHtml = '';
+    if (creds.configured) {
+      const sourceIcon = creds.source === 'env' ? '🌐' : '💾';
+      statusHtml = `<div class="key-status configured">✓ ${creds.masked} — ${sourceIcon} ${creds.source}</div>`;
+    } else if (envVar) {
+      statusHtml = `<div class="key-status missing">Not set — provide below or set <code style="font-size:10px;background:var(--bg);padding:1px 4px;border-radius:3px">$${envVar}</code></div>`;
+    }
     const hint = isOauth
       ? '<p style="font-size:11px;color:var(--text-dim);margin-top:4px">From your Claude Max/Pro subscription.</p>'
       : '';
     keySection.innerHTML = `<div class="field">
-      <label>${label}</label>
+      <label>${label} ${envHint}</label>
       <input type="password" id="setup-key" placeholder="${placeholder}" autocomplete="off">
       ${statusHtml}${hint}
     </div>`;
