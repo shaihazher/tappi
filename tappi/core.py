@@ -949,6 +949,163 @@ class Browser:
         time.sleep(ms / 1000)
         return f"Waited {ms}ms"
 
+    # ── Raw keyboard input (canvas apps) ──
+
+    # Key name → (key, code, keyCode)
+    _SPECIAL_KEYS: dict[str, tuple[str, str, int]] = {
+        "enter": ("Enter", "Enter", 13),
+        "tab": ("Tab", "Tab", 9),
+        "escape": ("Escape", "Escape", 27),
+        "backspace": ("Backspace", "Backspace", 8),
+        "delete": ("Delete", "Delete", 46),
+        "arrowup": ("ArrowUp", "ArrowUp", 38),
+        "arrowdown": ("ArrowDown", "ArrowDown", 40),
+        "arrowleft": ("ArrowLeft", "ArrowLeft", 37),
+        "arrowright": ("ArrowRight", "ArrowRight", 39),
+        "home": ("Home", "Home", 36),
+        "end": ("End", "End", 35),
+        "pageup": ("PageUp", "PageUp", 33),
+        "pagedown": ("PageDown", "PageDown", 34),
+        "space": (" ", "Space", 32),
+    }
+
+    _MODIFIER_FLAGS: dict[str, int] = {
+        "alt": 1, "ctrl": 2, "control": 2,
+        "meta": 4, "cmd": 4, "command": 4,
+        "shift": 8,
+    }
+
+    def keys(
+        self,
+        *actions: str,
+        delay: int = 10,
+    ) -> str:
+        """Send raw CDP keyboard events (bypasses DOM).
+
+        Works on canvas-based apps like Google Sheets, Docs, Figma where
+        ``type()`` can't target canvas content areas.
+
+        Actions can be plain text strings, special key names prefixed with
+        ``--`` (e.g. ``--enter``, ``--tab``), or combos via ``--combo``
+        (e.g. ``--combo cmd+b``).
+
+        Args:
+            *actions: Sequence of text strings, ``--key`` flags, or
+                ``--combo <combo>`` pairs.
+            delay: Per-character delay in ms (default 10).
+
+        Returns:
+            Summary of what was sent.
+
+        Examples:
+            >>> b.keys("hello", "--tab", "world", "--enter")
+            'Sent: 10 chars + 2 key(s)'
+            >>> b.keys("--combo", "cmd+b")
+            'Sent: 1 key(s)'
+        """
+        cdp = self._connect_page()
+        try:
+            typed = 0
+            key_count = 0
+
+            # Build action list
+            parsed: list[dict] = []
+            i = 0
+            args = list(actions)
+            while i < len(args):
+                arg = args[i]
+
+                if arg == "--delay" and i + 1 < len(args):
+                    delay = int(args[i + 1])
+                    i += 2
+                    continue
+
+                if arg == "--combo" and i + 1 < len(args):
+                    combo = self._parse_combo(args[i + 1])
+                    if combo:
+                        parsed.append(combo)
+                    i += 2
+                    continue
+
+                flag_map = {
+                    "--enter": "enter", "--tab": "tab", "--escape": "escape",
+                    "--esc": "escape", "--backspace": "backspace",
+                    "--delete": "delete", "--up": "arrowup",
+                    "--down": "arrowdown", "--left": "arrowleft",
+                    "--right": "arrowright", "--home": "home",
+                    "--end": "end", "--pageup": "pageup",
+                    "--pagedown": "pagedown", "--space": "space",
+                }
+
+                lower = arg.lower()
+                if lower in flag_map:
+                    k, c, kc = self._SPECIAL_KEYS[flag_map[lower]]
+                    parsed.append({"type": "key", "key": k, "code": c, "keyCode": kc, "modifiers": 0})
+                    i += 1
+                    continue
+
+                if not arg.startswith("--"):
+                    parsed.append({"type": "text", "value": arg})
+                i += 1
+
+            for action in parsed:
+                if action["type"] == "text":
+                    for ch in action["value"]:
+                        cdp.send("Input.dispatchKeyEvent", type="keyDown", text=ch)
+                        cdp.send("Input.dispatchKeyEvent", type="keyUp")
+                        time.sleep(delay / 1000)
+                    typed += len(action["value"])
+                else:
+                    cdp.send(
+                        "Input.dispatchKeyEvent",
+                        type="rawKeyDown",
+                        key=action["key"],
+                        code=action["code"],
+                        windowsVirtualKeyCode=action["keyCode"],
+                        nativeVirtualKeyCode=action["keyCode"],
+                        modifiers=action.get("modifiers", 0),
+                    )
+                    time.sleep(0.01)
+                    cdp.send(
+                        "Input.dispatchKeyEvent",
+                        type="keyUp",
+                        key=action["key"],
+                        code=action["code"],
+                        windowsVirtualKeyCode=action["keyCode"],
+                        nativeVirtualKeyCode=action["keyCode"],
+                        modifiers=action.get("modifiers", 0),
+                    )
+                    key_count += 1
+                    time.sleep(0.03)
+
+            parts = []
+            if typed:
+                parts.append(f"{typed} chars")
+            if key_count:
+                parts.append(f"{key_count} key(s)")
+            return f"Sent: {' + '.join(parts)}" if parts else "Nothing sent"
+        finally:
+            cdp.close()
+
+    def _parse_combo(self, combo: str) -> dict | None:
+        """Parse a key combo string like 'cmd+b' into an action dict."""
+        parts = combo.lower().split("+")
+        modifiers = 0
+        key_part = None
+        for p in parts:
+            if p in self._MODIFIER_FLAGS:
+                modifiers |= self._MODIFIER_FLAGS[p]
+            else:
+                key_part = p
+        if not key_part:
+            return None
+        if key_part in self._SPECIAL_KEYS:
+            k, c, kc = self._SPECIAL_KEYS[key_part]
+            return {"type": "combo", "key": k, "code": c, "keyCode": kc, "modifiers": modifiers}
+        upper = key_part.upper() if (modifiers & 8) else key_part
+        code = f"Key{key_part.upper()}"
+        return {"type": "combo", "key": upper, "code": code, "keyCode": ord(key_part.upper()), "modifiers": modifiers}
+
     # ── Launch Chrome ──
 
     @staticmethod

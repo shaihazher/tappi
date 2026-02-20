@@ -369,6 +369,30 @@ def tappi_wait(ms: int = 1000) -> str:
 
 
 @mcp.tool()
+def tappi_keys(actions: list[str]) -> str:
+    """Send raw CDP keyboard events (bypasses DOM, works on canvas apps).
+
+    Use for canvas-based apps like Google Sheets, Docs, Slides, Figma where
+    tappi_type() can't target canvas content areas. Navigation elements
+    (menus, toolbars) are still DOM — use tappi_click/tappi_type for those.
+
+    Actions is a list of strings: plain text to type, key flags (--enter,
+    --tab, --escape, --backspace, --delete, --up, --down, --left, --right),
+    or --combo followed by a key combination (e.g. cmd+b, ctrl+a).
+
+    Examples:
+        ["Revenue", "--tab", "Q1", "--tab", "Q2", "--enter"]
+        ["--combo", "cmd+b"]
+        ["--combo", "cmd+a", "--delete"]
+    """
+    try:
+        b = _get_browser()
+        return b.keys(*actions)
+    except (BrowserNotRunning, CDPError) as e:
+        return _error(str(e))
+
+
+@mcp.tool()
 def tappi_launch(port: int = 0, profile: str = "default", headless: bool = False) -> str:
     """Launch Chrome with remote debugging enabled.
 

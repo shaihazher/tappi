@@ -278,6 +278,24 @@ COMMANDS_HELP = {
             "  x=95 y=440 w=302 h=76 center=(246, 478)"
         ),
     },
+    "keys": {
+        "usage": 'tappi keys <text> [--enter] [--tab] [--combo <combo>]',
+        "desc": (
+            "Send raw CDP keyboard events (bypasses DOM).\n\n"
+            "Works on canvas-based apps like Google Sheets, Docs, Figma\n"
+            "where type() can't target canvas content areas.\n\n"
+            "Flags: --enter --tab --escape --backspace --delete\n"
+            "       --up --down --left --right --home --end --space\n"
+            "       --combo <combo> (e.g. cmd+b, ctrl+a, cmd+shift+z)\n"
+            "       --delay <ms> (per-character delay, default 10)"
+        ),
+        "example": (
+            '  $ tappi keys "Revenue" --tab "Q1" --tab "Q2" --enter\n'
+            "  Sent: 11 chars + 3 key(s)\n\n"
+            "  $ tappi keys --combo cmd+b\n"
+            "  Sent: 1 key(s)"
+        ),
+    },
 }
 
 
@@ -708,6 +726,23 @@ def run_command(browser: Browser, cmd: str, args: list[str]) -> str | None:
             return None
         info = browser.iframe_rect(" ".join(args))
         return f"x={info['x']} y={info['y']} w={info['width']} h={info['height']} center=({info['cx']}, {info['cy']})"
+
+    elif cmd == "keys":
+        if not args:
+            print("Usage: tappi keys <text> [--enter] [--tab] [--escape]")
+            print("       tappi keys --combo <key-combo>     e.g. --combo cmd+b")
+            print()
+            print("Sends raw CDP keyboard events (bypasses DOM).")
+            print("Works on canvas apps like Google Sheets, Docs, Figma.")
+            print()
+            print("Flags:  --enter  --tab  --escape  --backspace  --delete")
+            print("        --up  --down  --left  --right")
+            print("        --combo <combo>  (e.g. cmd+a, ctrl+shift+end)")
+            print("        --delay <ms>  (per-char delay, default 10)")
+            print()
+            print('Can chain: tappi keys "hello" --tab "world" --enter')
+            return None
+        return browser.keys(*args)
 
     else:
         print(_red(f"Unknown command: {cmd}"))
