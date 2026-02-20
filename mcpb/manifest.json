@@ -51,7 +51,8 @@
     { "name": "tappi_refresh", "description": "Reload page" },
     { "name": "tappi_newtab", "description": "Open new tab" },
     { "name": "tappi_close", "description": "Close tab" },
-    { "name": "tappi_wait", "description": "Wait for specified milliseconds" }
+    { "name": "tappi_wait", "description": "Wait for specified milliseconds" },
+    { "name": "tappi_launch", "description": "Launch Chrome with remote debugging (auto-launches on first tool call, but use this to switch profiles or restart)" }
   ],
   "user_config": {
     "cdp_url": {

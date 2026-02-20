@@ -11,11 +11,13 @@ Or run directly:
 
 from __future__ import annotations
 
-import base64
 import json
 import os
 import sys
+import time
 from typing import Any
+from urllib.error import URLError
+from urllib.request import urlopen
 
 from mcp.server.fastmcp import FastMCP
 
@@ -28,20 +30,66 @@ mcp = FastMCP(
     instructions=(
         "Browser control via Chrome DevTools Protocol. "
         "Connects to your existing Chrome — all sessions, cookies, extensions carry over. "
-        "Pierces shadow DOM. 3-10x fewer tokens than accessibility tree tools."
+        "Pierces shadow DOM. 3-10x fewer tokens than accessibility tree tools. "
+        "If Chrome is not running, tappi will auto-launch it on the first tool call."
     ),
 )
 
-# Lazy browser singleton — connects on first tool call
+# Lazy browser singleton — connects on first tool call, auto-launches Chrome if needed
 _browser: Browser | None = None
+_cdp_port: int = 9222
+
+
+def _parse_cdp_port() -> int:
+    """Extract port from CDP_URL env var."""
+    cdp_url = os.environ.get("CDP_URL", "http://127.0.0.1:9222")
+    try:
+        return int(cdp_url.rsplit(":", 1)[-1].rstrip("/"))
+    except (ValueError, IndexError):
+        return 9222
+
+
+def _is_chrome_running(port: int) -> bool:
+    """Check if Chrome is reachable on the given port."""
+    try:
+        urlopen(f"http://127.0.0.1:{port}/json/version", timeout=2)
+        return True
+    except (URLError, OSError):
+        return False
+
+
+def _auto_launch_chrome(port: int) -> None:
+    """Launch Chrome with CDP if not already running."""
+    if _is_chrome_running(port):
+        return
+
+    # Launch Chrome with a persistent profile
+    user_data_dir = os.path.join(os.path.expanduser("~"), ".tappi", "profiles", "default")
+    try:
+        Browser.launch(port=port, user_data_dir=user_data_dir)
+        # Wait for Chrome to be ready
+        for _ in range(15):
+            if _is_chrome_running(port):
+                return
+            time.sleep(0.5)
+    except Exception:
+        pass  # Will fail naturally when Browser() tries to connect
 
 
 def _get_browser() -> Browser:
-    global _browser
+    global _browser, _cdp_port
     if _browser is None:
+        _cdp_port = _parse_cdp_port()
+        _auto_launch_chrome(_cdp_port)
         cdp_url = os.environ.get("CDP_URL")
         _browser = Browser(cdp_url)
     return _browser
+
+
+def _reset_browser() -> None:
+    """Reset browser connection (used after launch/relaunch)."""
+    global _browser
+    _browser = None
 
 
 def _error(msg: str) -> str:
@@ -318,6 +366,57 @@ def tappi_wait(ms: int = 1000) -> str:
         return b.wait(ms)
     except (BrowserNotRunning, CDPError) as e:
         return _error(str(e))
+
+
+@mcp.tool()
+def tappi_launch(port: int = 0, profile: str = "default", headless: bool = False) -> str:
+    """Launch Chrome with remote debugging enabled.
+
+    Starts a Chrome instance with a persistent profile. All logins, cookies,
+    and extensions in that profile persist across restarts — log in once,
+    automate forever.
+
+    If Chrome is already running on the target port, returns status without
+    relaunching. Use this to start Chrome explicitly, switch profiles, or
+    restart after closing the browser window.
+
+    Args:
+        port: CDP port (default: uses CDP_URL env or 9222).
+        profile: Profile name — each profile has its own sessions/cookies.
+                 Default: "default". Use different names for different accounts.
+        headless: Run without a visible window (for server/CI environments).
+    """
+    try:
+        target_port = port if port > 0 else _parse_cdp_port()
+        user_data_dir = os.path.join(
+            os.path.expanduser("~"), ".tappi", "profiles", profile
+        )
+
+        if _is_chrome_running(target_port):
+            return f"Chrome already running on port {target_port} (profile: {profile}). Ready to use."
+
+        Browser.launch(port=target_port, user_data_dir=user_data_dir, headless=headless)
+
+        # Wait for Chrome to be ready
+        for _ in range(15):
+            if _is_chrome_running(target_port):
+                _reset_browser()
+                is_first = not os.path.exists(os.path.join(user_data_dir, "Default", "Preferences"))
+                msg = f"Chrome launched on port {target_port} (profile: {profile})."
+                if is_first:
+                    msg += (
+                        "\n\nThis is a fresh profile — a Chrome window has opened. "
+                        "Log into the sites you want to automate (Gmail, GitHub, etc.). "
+                        "Those sessions will persist for all future launches."
+                    )
+                else:
+                    msg += " Your saved sessions are active."
+                return msg
+            time.sleep(0.5)
+
+        return _error("Chrome launched but didn't become ready within 7 seconds. Check if another instance is blocking the port.")
+    except Exception as e:
+        return _error(f"Failed to launch Chrome: {e}")
 
 
 # ── Entry point ──
