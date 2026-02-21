@@ -512,6 +512,36 @@ class Browser:
         cdp = self._connect_page()
         try:
             self._ensure_indexed(cdp)
+
+            # Capture state before click
+            pre = cdp.send(
+                "Runtime.evaluate",
+                expression="""(() => {
+                    return JSON.stringify({
+                        url: location.href,
+                        dialogs: document.querySelectorAll('[role=dialog],[aria-modal=true]').length
+                    });
+                })()""",
+                returnByValue=True,
+            )
+            pre_state = json.loads(pre.get("result", {}).get("value", "{}"))
+
+            # Also check checkbox/radio state before click
+            check_pre = cdp.send(
+                "Runtime.evaluate",
+                expression=f"""(() => {{
+                    const el = (window.__bpyDeepQuery && window.__bpyDeepQuery({index})) || document.querySelector('[data-bpy-idx="{index}"]');
+                    if (!el) return JSON.stringify({{}});
+                    const tag = el.tagName.toLowerCase();
+                    const type = (el.type || '').toLowerCase();
+                    if ((tag === 'input' && (type === 'checkbox' || type === 'radio')) || el.getAttribute('role') === 'checkbox' || el.getAttribute('role') === 'radio')
+                        return JSON.stringify({{ toggle: true, checked: el.checked || el.getAttribute('aria-checked') === 'true' }});
+                    return JSON.stringify({{}});
+                }})()""",
+                returnByValue=True,
+            )
+            pre_toggle = json.loads(check_pre.get("result", {}).get("value", "{}"))
+
             result = cdp.send(
                 "Runtime.evaluate",
                 expression=click_info_js(index),
@@ -521,7 +551,55 @@ class Browser:
             if "error" in info:
                 raise CDPError(info["error"])
 
-            return f"Clicked: ({info['label']}) {info['desc']}"
+            # Brief pause for navigation/state changes
+            time.sleep(0.15)
+
+            # Capture state after click
+            try:
+                post = cdp.send(
+                    "Runtime.evaluate",
+                    expression="""(() => {
+                        return JSON.stringify({
+                            url: location.href,
+                            dialogs: document.querySelectorAll('[role=dialog],[aria-modal=true]').length
+                        });
+                    })()""",
+                    returnByValue=True,
+                )
+                post_state = json.loads(post.get("result", {}).get("value", "{}"))
+            except Exception:
+                # Page navigated — cdp connection may be stale
+                return f"Clicked: ({info['label']}) {info['desc']} — navigated away"
+
+            # Build status suffix
+            status = ""
+            pre_url = pre_state.get("url", "")
+            post_url = post_state.get("url", "")
+            if post_url != pre_url:
+                # Shorten URL for display
+                from urllib.parse import urlparse
+                path = urlparse(post_url).path or "/"
+                status = f" — navigated to {path}"
+            elif pre_toggle.get("toggle"):
+                # Re-check toggle state
+                try:
+                    check_post = cdp.send(
+                        "Runtime.evaluate",
+                        expression=f"""(() => {{
+                            const el = (window.__bpyDeepQuery && window.__bpyDeepQuery({index})) || document.querySelector('[data-bpy-idx="{index}"]');
+                            if (!el) return 'unknown';
+                            return el.checked || el.getAttribute('aria-checked') === 'true' ? 'checked' : 'unchecked';
+                        }})()""",
+                        returnByValue=True,
+                    )
+                    new_state = check_post.get("result", {}).get("value", "unknown")
+                    status = f" — now {new_state}"
+                except Exception:
+                    pass
+            elif post_state.get("dialogs", 0) > pre_state.get("dialogs", 0):
+                status = " — dialog opened"
+
+            return f"Clicked: ({info['label']}) {info['desc']}{status}"
         finally:
             cdp.close()
 
@@ -621,9 +699,28 @@ class Browser:
                     expression=set_input_value_js(index, text),
                 )
 
+            # Auto-verify
             tag = info.get("tag", "element")
             ce = ", contenteditable" if info.get("ce") else ""
-            return f"Typed into [{index}] ({tag}{ce})"
+            try:
+                verify = cdp.send(
+                    "Runtime.evaluate",
+                    expression=check_value_js(index),
+                    returnByValue=True,
+                )
+                v = json.loads(verify.get("result", {}).get("value", "{}"))
+                actual_len = v.get("length", 0)
+                focused = v.get("focused", False)
+                if actual_len >= len(text) * 0.9:
+                    return f"Typed {actual_len} chars into [{index}] ({tag}{ce}) — verified ✓"
+                elif actual_len == 0 and not focused:
+                    return f"Typed into [{index}] ({tag}{ce}) — ⚠ element shows 0 chars and lost focus. Use focus({index}) to reclaim, then retry."
+                elif actual_len == 0:
+                    return f"Typed into [{index}] ({tag}{ce}) — ⚠ element shows 0 chars. Content may not have landed."
+                else:
+                    return f"Typed into [{index}] ({tag}{ce}) — ⚠ expected {len(text)} chars, got {actual_len}"
+            except Exception:
+                return f"Typed into [{index}] ({tag}{ce})"
         finally:
             cdp.close()
 
