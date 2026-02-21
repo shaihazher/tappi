@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tappi"
-version = "0.8.0"
+version = "0.8.1"
 description = "Lightweight CDP browser control for Python — with an AI agent that can browse, read PDFs, manage files, and automate tasks."
 readme = "README.md"
 license = "MIT"
