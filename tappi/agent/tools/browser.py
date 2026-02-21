@@ -131,6 +131,7 @@ TOOL_SCHEMA = {
                 "double": {"type": "boolean", "description": "Double-click for click_xy"},
                 "right": {"type": "boolean", "description": "Right-click for click_xy"},
                 "actions": {"type": "array", "items": {"type": "string"}, "description": "List of actions for keys: text strings, --flags (--enter, --tab, etc.), or --combo pairs"},
+                "grep": {"type": "string", "description": "Filter output for text/elements — returns only lines matching this pattern (case-insensitive). Much cheaper than full output when verifying specific content."},
             },
             "required": ["action"],
         },
@@ -283,7 +284,13 @@ class BrowserTool:
                 elements = browser.elements(params.get("selector"))
                 if not elements:
                     return "No interactive elements found. The page might still be loading — try wait then elements again."
-                return "\n".join(str(e) for e in elements)
+                lines = [str(e) for e in elements]
+                grep = params.get("grep", "")
+                if grep:
+                    lines = [l for l in lines if grep.lower() in l.lower()]
+                    if not lines:
+                        return f"No elements matching '{grep}' found."
+                return "\n".join(lines)
 
             elif action == "click":
                 idx = params.get("index")
@@ -328,7 +335,14 @@ class BrowserTool:
                 return browser.paste(int(idx), content)
 
             elif action == "text":
-                return browser.text(params.get("selector"))
+                result = browser.text(params.get("selector"))
+                grep = params.get("grep", "")
+                if grep:
+                    lines = [l for l in result.split("\n") if grep.lower() in l.lower()]
+                    if not lines:
+                        return f"No lines matching '{grep}' found on page."
+                    return "\n".join(lines)
+                return result
 
             elif action == "html":
                 sel = params.get("selector", "")

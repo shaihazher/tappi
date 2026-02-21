@@ -166,19 +166,26 @@ def tappi_close(index: int = -1) -> str:
 
 
 @mcp.tool()
-def tappi_elements(selector: str = "") -> str:
+def tappi_elements(selector: str = "", grep: str = "") -> str:
     """List all interactive elements on the page (links, buttons, inputs, etc.).
 
     Each element gets a numbered index for use with tappi_click and tappi_type.
     Pierces shadow DOM automatically (works on Reddit, Gmail, GitHub, etc.).
     Optionally pass a CSS selector to narrow scope.
+    Pass 'grep' to filter — returns only elements matching the pattern
+    (case-insensitive). Useful for finding specific buttons or inputs.
     """
     try:
         b = _get_browser()
         elements = b.elements(selector or None)
         if not elements:
             return "No interactive elements found."
-        return "\n".join(str(e) for e in elements)
+        lines = [str(e) for e in elements]
+        if grep:
+            lines = [l for l in lines if grep.lower() in l.lower()]
+            if not lines:
+                return f"No elements matching '{grep}' found."
+        return "\n".join(lines)
     except (BrowserNotRunning, CDPError) as e:
         return _error(str(e))
 
@@ -281,14 +288,23 @@ def tappi_paste(index: int, content: str = "", file_path: str = "") -> str:
 
 
 @mcp.tool()
-def tappi_text(selector: str = "") -> str:
+def tappi_text(selector: str = "", grep: str = "") -> str:
     """Extract visible text from the page (max 8KB). Pierces shadow DOM.
 
     Optionally pass a CSS selector to extract text from a specific element.
+    Pass 'grep' to filter — returns only lines containing the pattern
+    (case-insensitive). Much cheaper than reading 8KB when you just need
+    to verify something like "Message sent" or "Error".
     """
     try:
         b = _get_browser()
-        return b.text(selector or None)
+        result = b.text(selector or None)
+        if grep:
+            lines = [l for l in result.split("\n") if grep.lower() in l.lower()]
+            if not lines:
+                return f"No lines matching '{grep}' found on page."
+            return "\n".join(lines)
+        return result
     except (BrowserNotRunning, CDPError) as e:
         return _error(str(e))
 
