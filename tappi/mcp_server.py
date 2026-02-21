@@ -31,7 +31,18 @@ mcp = FastMCP(
         "Browser control via Chrome DevTools Protocol. "
         "Connects to your existing Chrome — all sessions, cookies, extensions carry over. "
         "Pierces shadow DOM. 3-10x fewer tokens than accessibility tree tools. "
-        "If Chrome is not running, tappi will auto-launch it on the first tool call."
+        "If Chrome is not running, tappi will auto-launch it on the first tool call.\n\n"
+        "TOOL HIERARCHY:\n"
+        "Smart actions (handle focus, verification, fallbacks internally):\n"
+        "- tappi_paste: PREFERRED for long content. Auto-focuses, inserts, verifies, JS fallback.\n"
+        "- tappi_type: Good for short fields. Auto-focuses quietly (avoids popups), auto-verifies.\n"
+        "- tappi_click: Reports what changed (navigation, checkbox state, dialog).\n\n"
+        "Low-level actions (building blocks, rarely needed directly):\n"
+        "- tappi_focus: Reclaim focus manually when smart actions report focus loss.\n"
+        "- tappi_check: Read element value/state without modifying it.\n"
+        "- tappi_eval: Custom JS — last resort.\n"
+        "- tappi_keys: Raw keyboard for canvas apps (Sheets, Docs, Figma).\n\n"
+        "Recovery: if a smart action reports ⚠, use tappi_focus → retry → tappi_keys --escape → retry → tappi_eval."
     ),
 )
 
@@ -174,10 +185,11 @@ def tappi_elements(selector: str = "") -> str:
 
 @mcp.tool()
 def tappi_click(index: int) -> str:
-    """Click an element by its index number from tappi_elements output.
+    """[Smart] Click an element by its index number from tappi_elements output.
 
     Uses real mouse events (works with React, Vue, Angular SPAs).
     Auto-re-indexes elements if the page has changed.
+    Reports what changed after clicking: navigation, checkbox state, dialog opened.
     """
     try:
         b = _get_browser()
@@ -188,19 +200,14 @@ def tappi_click(index: int) -> str:
 
 @mcp.tool()
 def tappi_type(index: int, text: str) -> str:
-    """Type text into a DOM input element by index. Clears existing content first.
+    """[Smart] Type text into a DOM input element by index. Good for short fields.
 
-    Works with inputs, textareas, contenteditable, and ARIA textboxes.
+    Auto-focuses quietly (el.focus() first, avoids triggering popups),
+    clears existing content, types, and auto-verifies the result.
+    Response includes char count and verification status.
 
-    NOTE: This targets DOM elements only. Canvas-based apps (Google Sheets,
-    Docs, Slides, Figma) render content on <canvas> — their cell/content
-    areas aren't DOM elements, so tappi_type won't work on them. Use
-    tappi_keys() instead for raw CDP keyboard input in canvas apps.
-    Navigation elements (name box, menus, toolbars) ARE still DOM — use
-    tappi_type for those.
-
-    After typing, use tappi_check() to verify the text landed correctly —
-    popups, contact cards, or autocomplete overlays can silently steal focus.
+    For long content (emails, comments, posts), prefer tappi_paste() instead.
+    For canvas apps (Sheets, Docs, Figma), use tappi_keys().
     """
     try:
         b = _get_browser()
@@ -211,14 +218,12 @@ def tappi_type(index: int, text: str) -> str:
 
 @mcp.tool()
 def tappi_focus(index: int) -> str:
-    """Focus an element by index WITHOUT triggering click events.
+    """[Low-level] Focus an element by index WITHOUT triggering click events.
 
-    Calls el.focus() and scrolls into view. Use to reclaim input focus
-    after a popup, contact card, dropdown, or autocomplete overlay appeared
-    and shifted focus away from your target element.
-
-    Lighter than tappi_click — won't trigger click handlers that might
-    spawn additional popups or overlays. Preferred for focus recovery.
+    Building block — you rarely need this directly since tappi_type and
+    tappi_paste handle focus automatically. Use when a smart action reports
+    focus loss (⚠ in response) and you need to manually reclaim focus
+    before retrying.
     """
     try:
         b = _get_browser()
@@ -229,20 +234,14 @@ def tappi_focus(index: int) -> str:
 
 @mcp.tool()
 def tappi_check(index: int) -> str:
-    """Read the current value/text of an element by index.
+    """[Low-level] Read the current value/text of an element by index.
 
-    Returns the element's content (input value, textarea value, or innerText),
-    character count, and whether it currently has focus.
+    Building block — you rarely need this directly since tappi_type and
+    tappi_paste auto-verify internally. Use when you need to inspect an
+    element's state without modifying it, or to diagnose issues when
+    smart actions report problems.
 
-    Use after tappi_type() to verify text actually landed in the right element.
-    Catches silent failures from focus shifts, popup interference, or
-    contenteditable quirks. One quick check before Send/Submit saves recovery time.
-
-    If the value is empty or wrong after typing:
-    1. Use tappi_focus() to reclaim focus (won't trigger more popups)
-    2. Or use tappi_keys('--escape') to dismiss any overlay first
-    3. Then retry tappi_type()
-    4. If these steps don't resolve it, use tappi_eval() for a custom JS fix
+    Returns value, character count, and whether the element has focus.
     """
     try:
         b = _get_browser()
@@ -253,21 +252,16 @@ def tappi_check(index: int) -> str:
 
 @mcp.tool()
 def tappi_paste(index: int, content: str = "", file_path: str = "") -> str:
-    """Paste content into an element with auto-verification and fallback.
+    """[Smart] Paste content into an element — PREFERRED for long content.
 
-    Reliable content insertion for long text (email bodies, comments, posts).
-    Handles the full flow automatically: focus → clear → insert → verify →
-    JS fallback if needed → verify again.
+    Handles everything internally: focus → clear → insert → verify →
+    JS fallback if needed → verify again. You get back a confirmed result.
 
-    Provide content directly via 'content', or pass a 'file_path' to read
-    content from a file (.md, .txt, etc.). File-based is preferred for long
-    content — avoids passing large text through tool parameters.
+    Use 'file_path' for content from files (emails, comments, posts) —
+    avoids passing large text through parameters. Use 'content' for inline text.
 
-    For short text, tappi_type() is fine. For canvas apps (Google Sheets,
-    Docs, Figma), use tappi_keys() instead — paste targets DOM elements only.
-
-    Returns success with character count and verification status, or a
-    helpful error if insertion failed.
+    For short fields (search, username), tappi_type() is simpler.
+    For canvas apps (Sheets, Docs), use tappi_keys() — paste is DOM-only.
     """
     try:
         b = _get_browser()
@@ -311,7 +305,11 @@ def tappi_html(selector: str) -> str:
 
 @mcp.tool()
 def tappi_eval(javascript: str) -> str:
-    """Run JavaScript in the page context and return the result."""
+    """[Low-level] Run JavaScript in the page context and return the result.
+
+    Last resort — use when smart actions (paste, type, click) can't solve
+    the problem. Prefer the higher-level tools first.
+    """
     try:
         b = _get_browser()
         result = b.eval(javascript)
