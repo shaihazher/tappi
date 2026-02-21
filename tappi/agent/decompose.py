@@ -531,7 +531,7 @@ class SubtaskRunner:
             browser_profile=self.browser_profile or cfg.get("browser_profile"),
             on_tool_call=self.on_tool_call,
             on_token_update=self._on_sub_token_update,
-            max_iterations=15,
+            max_iterations=30,
         )
         if not cfg.get("shell_enabled", True):
             agent._shell.enabled = False
