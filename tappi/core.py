@@ -643,15 +643,30 @@ class Browser:
             if "error" in info:
                 raise CDPError(info["error"])
 
-            # Click to focus (real mouse events)
-            click_opts = {
-                "x": info["x"],
-                "y": info["y"],
-                "button": "left",
-                "clickCount": 1,
-            }
-            cdp.send("Input.dispatchMouseEvent", type="mousePressed", **click_opts)
-            cdp.send("Input.dispatchMouseEvent", type="mouseReleased", **click_opts)
+            # Focus element — try el.focus() first (quiet, won't trigger
+            # popups/contact cards), fall back to mouse click if needed
+            focus_result = cdp.send(
+                "Runtime.evaluate",
+                expression=f"""(() => {{
+                    const el = (window.__bpyDeepQuery && window.__bpyDeepQuery({index})) || document.querySelector('[data-bpy-idx="{index}"]');
+                    if (!el) return false;
+                    el.focus();
+                    return document.activeElement === el;
+                }})()""",
+                returnByValue=True,
+            )
+            got_focus = focus_result.get("result", {}).get("value", False)
+
+            if not got_focus:
+                # Fallback: mouse click for elements that need it (some SPAs)
+                click_opts = {
+                    "x": info["x"],
+                    "y": info["y"],
+                    "button": "left",
+                    "clickCount": 1,
+                }
+                cdp.send("Input.dispatchMouseEvent", type="mousePressed", **click_opts)
+                cdp.send("Input.dispatchMouseEvent", type="mouseReleased", **click_opts)
             time.sleep(0.1)
 
             # Clear existing content
