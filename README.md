@@ -829,6 +829,15 @@ tappi/
 
 ---
 
+## Blog Posts
+
+- 🏆 [Tappi Is the Most Token-Efficient Browser Tool for AI Agents](https://dev.to/azeruddin_sheikh_f75230b5/tappi-is-the-most-token-efficient-browser-tool-for-ai-agents-nothing-else-comes-close-33gk) — Deep competitive analysis with live benchmarks vs Agent-Browser, Playwright CLI, and more
+- 🚀 [Every AI Browser Tool Is Broken Except One](https://dev.to/azeruddin_sheikh_f75230b5/every-ai-browser-tool-is-broken-except-one-33i0) — The original benchmark (59K tokens 3/3 ✅ vs 252K for browser tools)
+- 🔌 [Tappi MCP Is Live](https://dev.to/azeruddin_sheikh_f75230b5/tappi-mcp-is-live-give-claude-desktop-a-real-browser-1kk4) — MCP server for Claude Desktop
+- 🖥️ [Tappi Web UI Tutorial](https://dev.to/azeruddin_sheikh_f75230b5/tappi-web-ui-the-complete-setup-guide-4o5p) — Visual walkthrough
+
+---
+
 ## License
 
 MIT
