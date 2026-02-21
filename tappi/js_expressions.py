@@ -269,6 +269,57 @@ def extract_text_js(selector: str | None = None) -> str:
     """
 
 
+def focus_js(index: int) -> str:
+    """Focus an element by index without dispatching click events.
+
+    Calls el.focus() and scrolls into view. Lighter than click —
+    doesn't trigger click handlers that might spawn popups or cards.
+    """
+    return f"""
+    (() => {{
+      const el = (window.__bpyDeepQuery && window.__bpyDeepQuery({index})) || document.querySelector('[data-bpy-idx="{index}"]');
+      if (!el) return JSON.stringify({{ error: 'Element [{index}] not found. Run: elements' }});
+      el.scrollIntoView({{ block: 'center' }});
+      el.focus();
+      const tag = el.tagName.toLowerCase();
+      const label = el.getAttribute('role') || tag;
+      const desc = (el.getAttribute('aria-label') || el.textContent || '').trim().slice(0, 80);
+      const active = document.activeElement === el || (el.shadowRoot && el.shadowRoot.activeElement === document.activeElement);
+      return JSON.stringify({{ label, desc, focused: active }});
+    }})()
+    """
+
+
+def check_value_js(index: int) -> str:
+    """Read the current value/text of an element by index.
+
+    Returns the input value, textarea value, contenteditable text,
+    or innerText — whatever is appropriate for the element type.
+    Lightweight verification that a type() actually landed.
+    """
+    return f"""
+    (() => {{
+      const el = (window.__bpyDeepQuery && window.__bpyDeepQuery({index})) || document.querySelector('[data-bpy-idx="{index}"]');
+      if (!el) return JSON.stringify({{ error: 'Element [{index}] not found. Run: elements' }});
+      const tag = el.tagName.toLowerCase();
+      const ce = el.isContentEditable;
+      const role = el.getAttribute('role') || '';
+      let value = '';
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') {{
+        value = el.value || '';
+      }} else if (ce || role === 'textbox') {{
+        value = el.innerText || el.textContent || '';
+      }} else {{
+        value = el.innerText || el.textContent || '';
+      }}
+      const label = role || tag;
+      const desc = (el.getAttribute('aria-label') || el.placeholder || el.name || '').trim().slice(0, 60);
+      const isFocused = document.activeElement === el;
+      return JSON.stringify({{ label, desc, value: value.slice(0, 2000), length: value.length, focused: isFocused }});
+    }})()
+    """
+
+
 def get_html_js(selector: str) -> str:
     """Get outerHTML of an element by CSS selector."""
     sel_json = json.dumps(selector)

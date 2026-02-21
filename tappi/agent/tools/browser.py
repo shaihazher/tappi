@@ -22,7 +22,15 @@ TOOL_SCHEMA = {
             "browser with saved logins and cookies.\n\n"
             "Workflow: open a URL → elements (see what's clickable) → click/type → "
             "text (read result). Always call 'elements' after navigation to see "
-            "the page structure."
+            "the page structure.\n\n"
+            "VERIFY YOUR ACTIONS: After typing into fields (especially compose "
+            "areas, rich editors, forms), use 'check' to confirm the text landed "
+            "in the right element. If a popup, contact card, or dropdown appeared "
+            "and shifted focus, use 'focus' to reclaim it (lighter than click — "
+            "won't trigger more popups), or 'keys --escape' to dismiss the overlay. "
+            "Then retry your input. One quick verification before Send/Submit/Delete "
+            "catches silent failures and saves recovery time. If these steps don't "
+            "resolve the issue, use 'eval' for custom JS fixes."
         ),
         "parameters": {
             "type": "object",
@@ -31,7 +39,8 @@ TOOL_SCHEMA = {
                     "type": "string",
                     "enum": [
                         "launch", "tabs", "open", "tab", "newtab", "close_tab",
-                        "search", "elements", "click", "type", "text", "html", "eval",
+                        "search", "elements", "click", "type", "focus", "check",
+                        "text", "html", "eval",
                         "screenshot", "scroll", "url", "back", "forward",
                         "refresh", "upload", "wait", "profiles",
                         "create_profile", "switch_profile",
@@ -54,6 +63,12 @@ TOOL_SCHEMA = {
                         "- click: Click element by index (requires 'index')\n"
                         "- type: Type into a DOM element (requires 'index' and 'text'). "
                         "NOTE: won't work on canvas-based apps (Google Sheets, Docs, Figma) — use 'keys' instead\n"
+                        "- focus: Focus an element by index WITHOUT triggering click events (requires 'index'). "
+                        "Use to reclaim input focus after a popup, contact card, or dropdown appeared. "
+                        "Lighter than click — calls el.focus() only, so it won't spawn additional popups\n"
+                        "- check: Read the current value/text of an element by index (requires 'index'). "
+                        "Use after type to verify text landed correctly. Returns the value, length, and "
+                        "whether the element has focus. Catches silent failures from focus shifts\n"
                         "- text: Extract visible text (optional: 'selector')\n"
                         "- html: Get element HTML (requires 'selector')\n"
                         "- eval: Run JavaScript (requires 'expression')\n"
@@ -251,6 +266,18 @@ class BrowserTool:
                 if idx is None or not text:
                     return "Error: 'index' and 'text' parameters required for type action."
                 return browser.type(int(idx), text)
+
+            elif action == "focus":
+                idx = params.get("index")
+                if idx is None:
+                    return "Error: 'index' parameter required for focus action."
+                return browser.focus(int(idx))
+
+            elif action == "check":
+                idx = params.get("index")
+                if idx is None:
+                    return "Error: 'index' parameter required for check action."
+                return browser.check(int(idx))
 
             elif action == "text":
                 return browser.text(params.get("selector"))

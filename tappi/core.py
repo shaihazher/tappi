@@ -29,11 +29,13 @@ from urllib.error import URLError
 
 from tappi.js_expressions import (
     check_indexed_js,
+    check_value_js,
     clear_contenteditable_js,
     clear_input_js,
     click_info_js,
     elements_js,
     extract_text_js,
+    focus_js,
     get_html_js,
     set_input_value_js,
     type_info_js,
@@ -621,6 +623,89 @@ class Browser:
             tag = info.get("tag", "element")
             ce = ", contenteditable" if info.get("ce") else ""
             return f"Typed into [{index}] ({tag}{ce})"
+        finally:
+            cdp.close()
+
+    # ── Focus & verification ──
+
+    def focus(self, index: int) -> str:
+        """Focus an element by index without dispatching click events.
+
+        Calls el.focus() and scrolls into view. Lighter than click() —
+        doesn't trigger click handlers that might spawn popups, contact
+        cards, or dropdowns. Use when you need to regain input focus on
+        an element after a popup or overlay appeared.
+
+        Args:
+            index: Element index from elements() output.
+
+        Returns:
+            Description of what was focused and whether it received focus.
+
+        Example:
+            >>> b.focus(5)
+            'Focused: (textarea) Compose body — focused: True'
+        """
+        cdp = self._connect_page()
+        try:
+            self._ensure_indexed(cdp)
+            result = cdp.send(
+                "Runtime.evaluate",
+                expression=focus_js(index),
+                returnByValue=True,
+            )
+            info = json.loads(result.get("result", {}).get("value", "{}"))
+            if "error" in info:
+                raise CDPError(info["error"])
+            status = "focused" if info.get("focused") else "focus sent (element may not accept focus)"
+            desc = info.get("desc", "")
+            desc_part = f" {desc}" if desc else ""
+            return f"Focused: ({info['label']}){desc_part} — {status}"
+        finally:
+            cdp.close()
+
+    def check(self, index: int) -> str:
+        """Read the current value/text of an element by index.
+
+        Returns the element's current content — input value, textarea
+        value, contenteditable innerText, or plain innerText. Use after
+        type() to verify text actually landed in the right element.
+
+        Also reports whether the element currently has focus, which helps
+        diagnose cases where input went to the wrong place.
+
+        Args:
+            index: Element index from elements() output.
+
+        Returns:
+            JSON-like string with value, length, and focus state.
+
+        Example:
+            >>> b.check(5)
+            '[5] (textarea) Compose body — value: "Hello world..." (11 chars, focused)'
+        """
+        cdp = self._connect_page()
+        try:
+            self._ensure_indexed(cdp)
+            result = cdp.send(
+                "Runtime.evaluate",
+                expression=check_value_js(index),
+                returnByValue=True,
+            )
+            info = json.loads(result.get("result", {}).get("value", "{}"))
+            if "error" in info:
+                raise CDPError(info["error"])
+            value = info.get("value", "")
+            length = info.get("length", 0)
+            focused = info.get("focused", False)
+            label = info.get("label", "element")
+            desc = info.get("desc", "")
+            desc_part = f" {desc}" if desc else ""
+
+            # Truncate display value
+            display = value[:100] + "..." if len(value) > 100 else value
+            focus_str = "focused" if focused else "not focused"
+            return f"[{index}] ({label}){desc_part} — value: \"{display}\" ({length} chars, {focus_str})"
         finally:
             cdp.close()
 

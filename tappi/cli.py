@@ -278,6 +278,42 @@ COMMANDS_HELP = {
             "  x=95 y=440 w=302 h=76 center=(246, 478)"
         ),
     },
+    "focus": {
+        "usage": "tappi focus <index>",
+        "desc": (
+            "Focus an element by index WITHOUT triggering click events.\n\n"
+            "Calls el.focus() and scrolls into view. Use to reclaim input focus\n"
+            "after a popup, contact card, dropdown, or autocomplete overlay appeared.\n"
+            "Lighter than 'click' — won't trigger click handlers that might spawn\n"
+            "additional popups."
+        ),
+        "example": (
+            "  $ tappi focus 5\n"
+            "  Focused: (textarea) Compose body — focused\n\n"
+            "  # Typical flow: popup appeared → dismiss → refocus → retype\n"
+            "  $ tappi keys --escape         # Dismiss overlay\n"
+            "  $ tappi focus 5               # Reclaim focus\n"
+            "  $ tappi type 5 \"hello\"        # Retype"
+        ),
+        "hint": "Preferred over 'click' for focus recovery — avoids triggering new popups.",
+    },
+    "check": {
+        "usage": "tappi check <index>",
+        "desc": (
+            "Read the current value/text of an element by index.\n\n"
+            "Returns the element's content, character count, and focus state.\n"
+            "Use after 'type' to verify text actually landed in the right element.\n"
+            "Catches silent failures from focus shifts and popup interference."
+        ),
+        "example": (
+            "  $ tappi check 5\n"
+            "  [5] (textarea) Compose body — value: \"Hello world\" (11 chars, focused)\n\n"
+            "  # Empty value? Focus shifted. Recover:\n"
+            "  $ tappi focus 5\n"
+            "  $ tappi type 5 \"Hello world\""
+        ),
+        "hint": "One quick check before Send/Submit catches silent failures and saves recovery time.",
+    },
     "keys": {
         "usage": 'tappi keys <text> [--enter] [--tab] [--combo <combo>]',
         "desc": (
@@ -354,6 +390,8 @@ def print_main_help() -> None:
                 ("elements [selector]", "List clickable elements (numbered)"),
                 ("click <index>", "Click element by number"),
                 ("type <index> <text>", "Type into element"),
+                ("focus <index>", "Focus element (no click events)"),
+                ("check <index>", "Read element value (verify after type)"),
                 ("upload <path> [sel]", "Upload file"),
             ],
         ),
@@ -643,6 +681,18 @@ def run_command(browser: Browser, cmd: str, args: list[str]) -> str | None:
         index = int(args[0])
         text = " ".join(args[1:])
         return browser.type(index, text)
+
+    elif cmd == "focus":
+        if not args:
+            print_command_help("focus")
+            return None
+        return browser.focus(int(args[0]))
+
+    elif cmd == "check":
+        if not args:
+            print_command_help("check")
+            return None
+        return browser.check(int(args[0]))
 
     elif cmd == "text":
         return browser.text(args[0] if args else None)

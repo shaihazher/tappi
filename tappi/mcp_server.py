@@ -198,10 +198,55 @@ def tappi_type(index: int, text: str) -> str:
     tappi_keys() instead for raw CDP keyboard input in canvas apps.
     Navigation elements (name box, menus, toolbars) ARE still DOM — use
     tappi_type for those.
+
+    After typing, use tappi_check() to verify the text landed correctly —
+    popups, contact cards, or autocomplete overlays can silently steal focus.
     """
     try:
         b = _get_browser()
         return b.type(index, text)
+    except (BrowserNotRunning, CDPError) as e:
+        return _error(str(e))
+
+
+@mcp.tool()
+def tappi_focus(index: int) -> str:
+    """Focus an element by index WITHOUT triggering click events.
+
+    Calls el.focus() and scrolls into view. Use to reclaim input focus
+    after a popup, contact card, dropdown, or autocomplete overlay appeared
+    and shifted focus away from your target element.
+
+    Lighter than tappi_click — won't trigger click handlers that might
+    spawn additional popups or overlays. Preferred for focus recovery.
+    """
+    try:
+        b = _get_browser()
+        return b.focus(index)
+    except (BrowserNotRunning, CDPError) as e:
+        return _error(str(e))
+
+
+@mcp.tool()
+def tappi_check(index: int) -> str:
+    """Read the current value/text of an element by index.
+
+    Returns the element's content (input value, textarea value, or innerText),
+    character count, and whether it currently has focus.
+
+    Use after tappi_type() to verify text actually landed in the right element.
+    Catches silent failures from focus shifts, popup interference, or
+    contenteditable quirks. One quick check before Send/Submit saves recovery time.
+
+    If the value is empty or wrong after typing:
+    1. Use tappi_focus() to reclaim focus (won't trigger more popups)
+    2. Or use tappi_keys('--escape') to dismiss any overlay first
+    3. Then retry tappi_type()
+    4. If these steps don't resolve it, use tappi_eval() for a custom JS fix
+    """
+    try:
+        b = _get_browser()
+        return b.check(index)
     except (BrowserNotRunning, CDPError) as e:
         return _error(str(e))
 
