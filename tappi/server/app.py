@@ -598,6 +598,23 @@ async def launch_browser_profile(body: dict) -> JSONResponse:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+@app.post("/api/cdp/check")
+async def check_cdp_connection(body: dict) -> JSONResponse:
+    """Check if a CDP URL is reachable."""
+    import json as _json
+    from urllib.request import urlopen
+    from urllib.error import URLError
+
+    cdp_url = body.get("cdp_url", "").rstrip("/")
+    if not cdp_url:
+        return JSONResponse({"connected": False, "error": "No URL provided"})
+    try:
+        data = _json.loads(urlopen(f"{cdp_url}/json/version", timeout=3).read())
+        return JSONResponse({"connected": True, "browser": data.get("Browser", "unknown")})
+    except (URLError, OSError) as e:
+        return JSONResponse({"connected": False, "error": str(e)})
+
+
 @app.get("/api/profiles/status")
 async def profile_status() -> JSONResponse:
     """Check which profiles have a running browser."""
@@ -3165,10 +3182,34 @@ async function toggleDecompose() {
 }
 
 async function launchActiveBrowser() {
-  const profile = currentCfg.browser_profile || 'default';
   const btn = document.getElementById('launch-browser-btn');
   btn.disabled = true;
-  btn.textContent = '🌍 Opening...';
+  btn.textContent = '🌍 Connecting...';
+
+  // If CDP_URL is set, just verify connection — don't launch a new browser
+  const cdpUrl = (currentCfg.cdp_url || '').trim();
+  if (cdpUrl) {
+    try {
+      const res = await fetch('/api/cdp/check', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ cdp_url: cdpUrl }),
+      });
+      const data = await res.json();
+      if (data.connected) {
+        btn.textContent = '🌍 Connected (' + cdpUrl.replace('http://', '') + ')';
+      } else {
+        btn.textContent = '🌍 Not reachable';
+        alert('Cannot reach ' + cdpUrl + '. Make sure the external browser is running.');
+      }
+    } catch(e) { alert('Failed: ' + e); }
+    finally {
+      setTimeout(() => { btn.disabled = false; btn.textContent = '🌍 Open Browser'; }, 3000);
+    }
+    return;
+  }
+
+  // Normal profile launch
+  const profile = currentCfg.browser_profile || 'default';
   try {
     const res = await fetch('/api/profiles/launch', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
