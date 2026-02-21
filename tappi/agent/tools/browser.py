@@ -147,7 +147,21 @@ class BrowserTool:
     def _get_browser(self) -> Browser:
         """Get or create the browser connection."""
         if self._browser is None:
-            # Try to connect to default profile
+            # CDP_URL env var takes priority (external browser like OpenClaw)
+            import os
+            cdp_url = os.environ.get("CDP_URL")
+            if cdp_url:
+                try:
+                    self._browser = Browser(cdp_url)
+                    self._browser.tabs()
+                    if not self._initial_tabs:
+                        self.snapshot_tabs()
+                    return self._browser
+                except BrowserNotRunning:
+                    self._browser = None
+                    raise BrowserNotRunning(cdp_url)
+
+            # Fall back to profile-based connection
             try:
                 profile = get_profile(self._default_profile)
                 self._browser = Browser(f"http://127.0.0.1:{profile['port']}")
