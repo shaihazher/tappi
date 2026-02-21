@@ -252,6 +252,41 @@ def tappi_check(index: int) -> str:
 
 
 @mcp.tool()
+def tappi_paste(index: int, content: str = "", file_path: str = "") -> str:
+    """Paste content into an element with auto-verification and fallback.
+
+    Reliable content insertion for long text (email bodies, comments, posts).
+    Handles the full flow automatically: focus → clear → insert → verify →
+    JS fallback if needed → verify again.
+
+    Provide content directly via 'content', or pass a 'file_path' to read
+    content from a file (.md, .txt, etc.). File-based is preferred for long
+    content — avoids passing large text through tool parameters.
+
+    For short text, tappi_type() is fine. For canvas apps (Google Sheets,
+    Docs, Figma), use tappi_keys() instead — paste targets DOM elements only.
+
+    Returns success with character count and verification status, or a
+    helpful error if insertion failed.
+    """
+    try:
+        b = _get_browser()
+        text = content
+        if file_path and not text:
+            import os
+            fp = os.path.expanduser(file_path)
+            if not os.path.isfile(fp):
+                return _error(f"File not found: {fp}")
+            with open(fp, "r") as f:
+                text = f.read()
+        if not text:
+            return _error("Provide 'content' or 'file_path'.")
+        return b.paste(index, text)
+    except (BrowserNotRunning, CDPError) as e:
+        return _error(str(e))
+
+
+@mcp.tool()
 def tappi_text(selector: str = "") -> str:
     """Extract visible text from the page (max 8KB). Pierces shadow DOM.
 

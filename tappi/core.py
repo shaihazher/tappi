@@ -37,6 +37,7 @@ from tappi.js_expressions import (
     extract_text_js,
     focus_js,
     get_html_js,
+    paste_content_js,
     set_input_value_js,
     type_info_js,
 )
@@ -706,6 +707,121 @@ class Browser:
             display = value[:100] + "..." if len(value) > 100 else value
             focus_str = "focused" if focused else "not focused"
             return f"[{index}] ({label}){desc_part} — value: \"{display}\" ({length} chars, {focus_str})"
+        finally:
+            cdp.close()
+
+    def paste(self, index: int, content: str) -> str:
+        """Paste content into an element with auto-verification and fallback.
+
+        Reliable content insertion that handles the full flow:
+        1. Focus the element (no click events — avoids popups)
+        2. Clear existing content
+        3. Insert text via Input.insertText
+        4. Verify content landed (auto-check)
+        5. If verification fails, fall back to JS-based insertion
+        6. Verify again
+        7. Return success with char count or failure with details
+
+        Use for long content (emails, comments, posts). For short text,
+        type() works fine. For canvas apps (Sheets, Docs), use keys().
+
+        Args:
+            index: Element index from elements() output.
+            content: Text content to paste.
+
+        Returns:
+            Success message with char count, or error details.
+
+        Example:
+            >>> b.paste(5, "Hello world, this is a long email body...")
+            'Pasted 42 chars into [5] (textarea) — verified ✓'
+        """
+        cdp = self._connect_page()
+        try:
+            self._ensure_indexed(cdp)
+
+            # Step 1: Verify element is typeable and get info
+            result = cdp.send(
+                "Runtime.evaluate",
+                expression=type_info_js(index),
+                returnByValue=True,
+            )
+            info = json.loads(result.get("result", {}).get("value", "{}"))
+            if "error" in info:
+                raise CDPError(info["error"])
+
+            # Step 2: Focus (no click events to avoid popups)
+            cdp.send(
+                "Runtime.evaluate",
+                expression=focus_js(index),
+                returnByValue=True,
+            )
+            time.sleep(0.1)
+
+            # Step 3: Clear existing content
+            if info.get("ce"):
+                cdp.send(
+                    "Runtime.evaluate",
+                    expression=clear_contenteditable_js(index),
+                )
+                cdp.send("Input.dispatchKeyEvent", type="keyDown", key="Backspace", code="Backspace")
+                cdp.send("Input.dispatchKeyEvent", type="keyUp", key="Backspace", code="Backspace")
+            else:
+                cdp.send("Runtime.evaluate", expression=clear_input_js(index))
+
+            # Step 4: Insert text via CDP
+            try:
+                cdp.send("Input.insertText", text=content)
+            except CDPError:
+                pass  # Will fall back to JS below
+
+            # Step 5: Verify
+            check_result = cdp.send(
+                "Runtime.evaluate",
+                expression=check_value_js(index),
+                returnByValue=True,
+            )
+            check_info = json.loads(check_result.get("result", {}).get("value", "{}"))
+            actual_len = check_info.get("length", 0)
+
+            # Good enough? (allow small variance for whitespace/newline differences)
+            if actual_len >= len(content) * 0.9:
+                tag = info.get("tag", "element")
+                ce = ", contenteditable" if info.get("ce") else ""
+                return f"Pasted {actual_len} chars into [{index}] ({tag}{ce}) — verified ✓"
+
+            # Step 6: Fallback — JS-based insertion
+            fallback_result = cdp.send(
+                "Runtime.evaluate",
+                expression=paste_content_js(index, content),
+                returnByValue=True,
+            )
+            fb_info = json.loads(fallback_result.get("result", {}).get("value", "{}"))
+            if "error" in fb_info:
+                raise CDPError(fb_info["error"])
+
+            # Step 7: Final verification
+            final_check = cdp.send(
+                "Runtime.evaluate",
+                expression=check_value_js(index),
+                returnByValue=True,
+            )
+            final_info = json.loads(final_check.get("result", {}).get("value", "{}"))
+            final_len = final_info.get("length", 0)
+
+            if final_len >= len(content) * 0.9:
+                tag = info.get("tag", "element")
+                ce = ", contenteditable" if info.get("ce") else ""
+                return f"Pasted {final_len} chars into [{index}] ({tag}{ce}) — verified ✓ (JS fallback)"
+
+            # Both methods failed
+            tag = info.get("tag", "element")
+            focused = "focused" if final_info.get("focused") else "NOT focused"
+            return (
+                f"Paste into [{index}] ({tag}) may have failed. "
+                f"Expected ~{len(content)} chars, got {final_len}. "
+                f"Element is {focused}. Try: focus({index}), then paste again."
+            )
         finally:
             cdp.close()
 

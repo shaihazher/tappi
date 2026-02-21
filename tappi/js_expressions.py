@@ -320,6 +320,43 @@ def check_value_js(index: int) -> str:
     """
 
 
+def paste_content_js(index: int, text: str) -> str:
+    """Paste content into an element via JS — fallback when Input.insertText fails.
+
+    Sets value/innerHTML directly and dispatches proper events for React/Vue.
+    """
+    text_json = json.dumps(text)
+    return f"""
+    (() => {{
+      const el = (window.__bpyDeepQuery && window.__bpyDeepQuery({index})) || document.querySelector('[data-bpy-idx="{index}"]');
+      if (!el) return JSON.stringify({{ error: 'Element [{index}] not found. Run: elements' }});
+      const ce = el.isContentEditable;
+      const tag = el.tagName.toLowerCase();
+      try {{
+        if (ce) {{
+          el.focus();
+          el.innerHTML = {text_json}.replace(/\\n/g, '<br>');
+          el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+        }} else if (tag === 'input' || tag === 'textarea') {{
+          el.focus();
+          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+            || Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+          if (setter) setter.call(el, {text_json});
+          else el.value = {text_json};
+          el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+          el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+        }} else {{
+          return JSON.stringify({{ error: 'Element [{index}] is a ' + tag + ' — not a text input or contenteditable. Use keys for canvas apps.' }});
+        }}
+        const actual = ce ? (el.innerText || '') : (el.value || '');
+        return JSON.stringify({{ ok: true, length: actual.length }});
+      }} catch(e) {{
+        return JSON.stringify({{ error: 'JS paste failed: ' + e.message }});
+      }}
+    }})()
+    """
+
+
 def get_html_js(selector: str) -> str:
     """Get outerHTML of an element by CSS selector."""
     sel_json = json.dumps(selector)

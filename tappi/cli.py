@@ -314,6 +314,24 @@ COMMANDS_HELP = {
         ),
         "hint": "One quick check before Send/Submit catches silent failures and saves recovery time.",
     },
+    "paste": {
+        "usage": "tappi paste <index> <text>  OR  tappi paste <index> --file <path>",
+        "desc": (
+            "Paste content into an element with auto-verification and fallback.\n\n"
+            "Reliable content insertion for long text (emails, comments, posts).\n"
+            "Handles focus, clear, insert, verify, JS fallback — all in one command.\n"
+            "Pass text directly, or use --file to read from a .md/.txt file."
+        ),
+        "example": (
+            '  $ tappi paste 5 "Hello, this is my email body..."\n'
+            "  Pasted 35 chars into [5] (textarea) — verified ✓\n\n"
+            "  $ tappi paste 5 --file ~/drafts/email_body.md\n"
+            "  Pasted 4184 chars into [5] (div, contenteditable) — verified ✓"
+        ),
+        "hint": (
+            "Preferred over 'type' for long content. For canvas apps (Sheets, Docs), use 'keys' instead."
+        ),
+    },
     "keys": {
         "usage": 'tappi keys <text> [--enter] [--tab] [--combo <combo>]',
         "desc": (
@@ -392,6 +410,7 @@ def print_main_help() -> None:
                 ("type <index> <text>", "Type into element"),
                 ("focus <index>", "Focus element (no click events)"),
                 ("check <index>", "Read element value (verify after type)"),
+                ("paste <index> <text|--file>", "Paste content (auto-verify)"),
                 ("upload <path> [sel]", "Upload file"),
             ],
         ),
@@ -693,6 +712,29 @@ def run_command(browser: Browser, cmd: str, args: list[str]) -> str | None:
             print_command_help("check")
             return None
         return browser.check(int(args[0]))
+
+    elif cmd == "paste":
+        if not args:
+            print_command_help("paste")
+            return None
+        index = int(args[0])
+        # Check for --file flag
+        if "--file" in args:
+            fi = args.index("--file")
+            if fi + 1 >= len(args):
+                return "Error: --file requires a path argument."
+            import os
+            fp = os.path.expanduser(args[fi + 1])
+            if not os.path.isfile(fp):
+                return f"Error: File not found: {fp}"
+            with open(fp, "r") as f:
+                content = f.read()
+        else:
+            if len(args) < 2:
+                print_command_help("paste")
+                return None
+            content = " ".join(args[1:])
+        return browser.paste(index, content)
 
     elif cmd == "text":
         return browser.text(args[0] if args else None)

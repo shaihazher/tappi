@@ -40,7 +40,7 @@ TOOL_SCHEMA = {
                     "enum": [
                         "launch", "tabs", "open", "tab", "newtab", "close_tab",
                         "search", "elements", "click", "type", "focus", "check",
-                        "text", "html", "eval",
+                        "paste", "text", "html", "eval",
                         "screenshot", "scroll", "url", "back", "forward",
                         "refresh", "upload", "wait", "profiles",
                         "create_profile", "switch_profile",
@@ -69,6 +69,13 @@ TOOL_SCHEMA = {
                         "- check: Read the current value/text of an element by index (requires 'index'). "
                         "Use after type to verify text landed correctly. Returns the value, length, and "
                         "whether the element has focus. Catches silent failures from focus shifts\n"
+                        "- paste: Paste content into an element with auto-verification and fallback "
+                        "(requires 'index' + either 'text' or 'path' to a file). "
+                        "PREFERRED for long content like email bodies, comments, posts. "
+                        "Handles focus, insertion, verification, and JS fallback automatically. "
+                        "For short text, 'type' is fine. For canvas apps (Sheets, Docs), use 'keys'. "
+                        "Tip: in multi-step tasks, prior steps write content to files — use 'path' "
+                        "to reference those files instead of passing the content inline\n"
                         "- text: Extract visible text (optional: 'selector')\n"
                         "- html: Get element HTML (requires 'selector')\n"
                         "- eval: Run JavaScript (requires 'expression')\n"
@@ -292,6 +299,23 @@ class BrowserTool:
                 if idx is None:
                     return "Error: 'index' parameter required for check action."
                 return browser.check(int(idx))
+
+            elif action == "paste":
+                idx = params.get("index")
+                if idx is None:
+                    return "Error: 'index' parameter required for paste action."
+                content = params.get("text", "")
+                file_path = params.get("path", "")
+                if file_path and not content:
+                    import os
+                    fp = os.path.expanduser(file_path)
+                    if not os.path.isfile(fp):
+                        return f"Error: File not found: {fp}"
+                    with open(fp, "r") as f:
+                        content = f.read()
+                if not content:
+                    return "Error: 'text' or 'path' parameter required for paste action."
+                return browser.paste(int(idx), content)
 
             elif action == "text":
                 return browser.text(params.get("selector"))
