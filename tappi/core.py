@@ -1013,12 +1013,15 @@ class Browser:
 
     # ── Screenshot ──
 
-    def screenshot(self, path: str | None = None, *, format: str = "png") -> str:
+    def screenshot(self, path: str | None = None, *, format: str = "png",
+                   screenshot_dir: str | None = None) -> str:
         """Take a screenshot of the current page.
 
         Args:
-            path: File path to save to (default: /tmp/tappi_screenshot_<timestamp>.png).
+            path: File path to save to. If not given, saves to screenshot_dir
+                  or /tmp/ as fallback.
             format: Image format — "png" or "jpeg".
+            screenshot_dir: Directory to save screenshots in (default: /tmp/).
 
         Returns:
             The path where the screenshot was saved.
@@ -1030,7 +1033,13 @@ class Browser:
             result = cdp.send("Page.captureScreenshot", format=format)
             data = base64.b64decode(result.get("data", ""))
             ext = "jpg" if format == "jpeg" else format
-            out_path = path or f"/tmp/tappi_screenshot_{int(time.time())}.{ext}"
+            if path:
+                out_path = path
+            elif screenshot_dir:
+                os.makedirs(screenshot_dir, exist_ok=True)
+                out_path = os.path.join(screenshot_dir, f"screenshot_{int(time.time())}.{ext}")
+            else:
+                out_path = f"/tmp/tappi_screenshot_{int(time.time())}.{ext}"
             Path(out_path).write_bytes(data)
             return out_path
         finally:

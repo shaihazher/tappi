@@ -9,6 +9,7 @@ Uses LiteLLM for provider-agnostic LLM calls.
 from __future__ import annotations
 
 import json
+import re
 import time
 import sys
 from pathlib import Path
@@ -126,7 +127,12 @@ class Agent:
 
         # Initialize tools — browser downloads go to workspace/downloads
         downloads_dir = str(self.workspace / "downloads")
-        self._browser = BrowserTool(default_profile=browser_profile, download_dir=downloads_dir)
+        screenshots_dir = str(self.workspace / "screenshots")
+        self._browser = BrowserTool(
+            default_profile=browser_profile,
+            download_dir=downloads_dir,
+            screenshot_dir=screenshots_dir,
+        )
         self._files = FilesTool(workspace=self.workspace)
         self._pdf = PDFTool(workspace=self.workspace)
         self._spreadsheet = SpreadsheetTool(workspace=self.workspace)
@@ -170,6 +176,37 @@ class Agent:
 
         # Subtask runner reference (for probe to see active sub-agent)
         self._active_runner: Any = None
+
+    # ── Image marker pattern: [IMAGE:base64data:mimetype] ──
+    _IMAGE_MARKER_RE = re.compile(r'\[IMAGE:([A-Za-z0-9+/=]+):(image/[a-z]+)\]')
+
+    @staticmethod
+    def _parse_image_markers(text: str) -> tuple[str, list[dict]]:
+        """Extract image markers from text, return (clean_text, image_parts).
+
+        Each image_part is: {"type": "image_url", "image_url": {"url": "data:mime;base64,..."}}
+        """
+        images = []
+        for m in Agent._IMAGE_MARKER_RE.finditer(text):
+            b64_data = m.group(1)
+            mime = m.group(2)
+            images.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{b64_data}"}
+            })
+        clean = Agent._IMAGE_MARKER_RE.sub('', text).strip()
+        return clean, images
+
+    @staticmethod
+    def _build_content_parts(text: str, images: list[dict]) -> list[dict] | str:
+        """Build multipart content array if images present, else return plain text."""
+        if not images:
+            return text
+        parts: list[dict] = []
+        if text:
+            parts.append({"type": "text", "text": text})
+        parts.extend(images)
+        return parts
 
     def _get_timeout(self) -> int:
         """Get LLM call timeout from config (default 300s)."""
@@ -700,7 +737,10 @@ class Agent:
         Runs until the LLM produces a final text response (no more tool calls).
         Context is automatically compacted when token usage exceeds 75%.
         """
-        self.messages.append({"role": "user", "content": user_message})
+        # Parse user message for image markers (from WS file uploads, etc.)
+        clean_text, user_images = self._parse_image_markers(user_message)
+        user_content = self._build_content_parts(clean_text or user_message, user_images)
+        self.messages.append({"role": "user", "content": user_content})
 
         # Snapshot current browser tabs so cleanup knows what's pre-existing
         try:
@@ -774,10 +814,12 @@ class Agent:
                             del self.messages[-1]["content"]
 
                     result = self._execute_tool(parsed["name"], parsed["args"])
+                    clean_r, r_images = self._parse_image_markers(result)
+                    r_content = self._build_content_parts(clean_r or result, r_images)
                     self.messages.append({
                         "role": "tool",
                         "tool_call_id": tc_id,
-                        "content": result,
+                        "content": r_content,
                     })
                     continue  # Let LLM see the result
 
@@ -808,11 +850,17 @@ class Agent:
                 }
                 result = self._execute_tool(tc.function.name, args)
 
+                # Parse image markers from tool results for vision support
+                clean_result, result_images = self._parse_image_markers(result)
+                tool_content = self._build_content_parts(
+                    clean_result or result, result_images
+                )
+
                 # Add tool result to history
                 self.messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
-                    "content": result,
+                    "content": tool_content,
                 })
 
             # Continue loop — LLM will see tool results and decide next step

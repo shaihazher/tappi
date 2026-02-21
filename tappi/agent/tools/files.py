@@ -116,6 +116,13 @@ class FilesTool:
             return f"File not found: {path}"
         if resolved.is_dir():
             return f"'{path}' is a directory. Use action='list' instead."
+
+        # Check if it's an image — return as vision-compatible marker
+        IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+        ext = resolved.suffix.lower()
+        if ext in IMAGE_EXTS:
+            return self._read_image(resolved, path)
+
         encoding = params.get("encoding", "utf-8")
         try:
             content = resolved.read_text(encoding=encoding)
@@ -127,6 +134,26 @@ class FilesTool:
         if len(content) > 50_000:
             content = content[:50_000] + f"\n\n... (truncated, {len(content)} chars total)"
         return content
+
+    def _read_image(self, resolved: Path, display_path: str) -> str:
+        """Read an image file and return it as a vision-compatible marker."""
+        import base64
+
+        size = resolved.stat().st_size
+        if size > 10 * 1024 * 1024:  # 10MB cap
+            return f"Image too large ({size // (1024*1024)}MB). Max 10MB for vision."
+        try:
+            img_data = resolved.read_bytes()
+            b64 = base64.b64encode(img_data).decode("ascii")
+            ext = resolved.suffix.lower().lstrip(".")
+            mime_map = {
+                "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                "gif": "image/gif", "webp": "image/webp", "bmp": "image/bmp",
+            }
+            mime = mime_map.get(ext, "image/png")
+            return f"Image: {display_path} ({size} bytes)\n[IMAGE:{b64}:{mime}]"
+        except Exception as e:
+            return f"Error reading image: {e}"
 
     def _write(self, params: dict) -> str:
         path = params.get("path", "")

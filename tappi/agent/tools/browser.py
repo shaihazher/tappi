@@ -147,10 +147,12 @@ class BrowserTool:
     when the agent is done (via close_opened_tabs or cleanup).
     """
 
-    def __init__(self, default_profile: str | None = None, download_dir: str | None = None) -> None:
+    def __init__(self, default_profile: str | None = None, download_dir: str | None = None,
+                 screenshot_dir: str | None = None) -> None:
         self._browser: Browser | None = None
         self._default_profile = default_profile
         self._download_dir = download_dir
+        self._screenshot_dir = screenshot_dir
         self._opened_tabs: list[str] = []  # target IDs of tabs we opened
         self._initial_tabs: set[str] = set()  # tabs that existed before agent started
 
@@ -361,8 +363,23 @@ class BrowserTool:
                 return json.dumps(result, indent=2) if result is not None else "(undefined)"
 
             elif action == "screenshot":
-                path = browser.screenshot(params.get("path"))
-                return f"Screenshot saved: {path}"
+                import base64 as _b64
+                screenshot_path = browser.screenshot(
+                    params.get("path"),
+                    screenshot_dir=self._screenshot_dir,
+                )
+                # Read the screenshot and return as image marker for vision
+                try:
+                    with open(screenshot_path, "rb") as f:
+                        img_data = f.read()
+                    if len(img_data) <= 10 * 1024 * 1024:  # 10MB cap
+                        b64 = _b64.b64encode(img_data).decode("ascii")
+                        ext = screenshot_path.rsplit(".", 1)[-1].lower()
+                        mime = "image/jpeg" if ext in ("jpg", "jpeg") else "image/png"
+                        return f"Screenshot saved: {screenshot_path}\n[IMAGE:{b64}:{mime}]"
+                except Exception:
+                    pass
+                return f"Screenshot saved: {screenshot_path}"
 
             elif action == "scroll":
                 direction = params.get("direction", "down")

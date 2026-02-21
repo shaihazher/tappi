@@ -836,6 +836,71 @@ async def run_setup(body: dict) -> JSONResponse:
 # ── WebSocket for live updates ──
 
 
+def _process_file_attachments(message: str, files: list[dict]) -> str:
+    """Process file attachments from the web UI into the user message.
+
+    For images: embed as [IMAGE:base64:mime] markers that loop.py parses.
+    For text/code files: prepend file contents to the message.
+    For PDFs: extract text and prepend.
+    """
+    import base64 as _b64
+
+    parts = []
+    image_markers = []
+
+    for f in files:
+        name = f.get("name", "file")
+        ftype = f.get("type", "")
+        data = f.get("data", "")  # base64 data (may have data: URL prefix)
+
+        # Strip data URL prefix if present
+        if data.startswith("data:"):
+            # data:image/png;base64,AAAA...
+            _, data = data.split(",", 1)
+
+        if ftype.startswith("image/"):
+            # Images: pass as vision marker
+            image_markers.append(f"[IMAGE:{data}:{ftype}]")
+        elif ftype == "application/pdf":
+            # PDFs: try to extract text
+            try:
+                raw = _b64.b64decode(data)
+                # Save to temp, extract with PDFTool
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                    tmp.write(raw)
+                    tmp_path = tmp.name
+                try:
+                    from tappi.agent.tools.pdf import PDFTool
+                    pdf = PDFTool()
+                    text = pdf.execute(action="read", path=tmp_path)
+                    parts.append(f"[Attached PDF: {name}]\n{text[:20000]}")
+                except Exception:
+                    parts.append(f"[Attached PDF: {name} — could not extract text]")
+                finally:
+                    import os
+                    os.unlink(tmp_path)
+            except Exception:
+                parts.append(f"[Attached PDF: {name} — could not decode]")
+        else:
+            # Text files: decode and prepend
+            try:
+                raw = _b64.b64decode(data)
+                text = raw.decode("utf-8", errors="replace")
+                if len(text) > 30000:
+                    text = text[:30000] + "\n... (truncated)"
+                parts.append(f"[Attached file: {name}]\n```\n{text}\n```")
+            except Exception:
+                parts.append(f"[Attached file: {name} — could not decode]")
+
+    result = message
+    if parts:
+        result = "\n\n".join(parts) + "\n\n" + result
+    if image_markers:
+        result = result + "\n" + "\n".join(image_markers)
+    return result
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
     await ws.accept()
@@ -869,11 +934,17 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         "usage": usage,
                     }))
 
+                # Process file attachments
+                user_message = msg.get("message", "")
+                files = msg.get("files", [])
+                if files:
+                    user_message = _process_file_attachments(user_message, files)
+
                 await ws.send_text(json.dumps({"type": "thinking"}))
 
                 loop = asyncio.get_event_loop()
                 _chat_task = asyncio.ensure_future(
-                    loop.run_in_executor(None, agent.chat, msg.get("message", ""))
+                    loop.run_in_executor(None, agent.chat, user_message)
                 )
                 try:
                     result = await _chat_task
@@ -1249,7 +1320,7 @@ _FALLBACK_HTML = """\
   .msg.tool .tool-name { color: var(--accent); font-weight: 600; }
   .msg.thinking { color: var(--text-dim); font-style: italic; }
   #input-area { padding: 12px 20px; border-top: 1px solid var(--border);
-    display: flex; gap: 8px; }
+    display: flex; gap: 8px; flex-wrap: wrap; }
   #input { flex: 1; background: var(--surface); border: 1px solid var(--border);
     border-radius: 8px; padding: 10px 14px; color: var(--text); font-size: 14px;
     outline: none; resize: none; min-height: 44px; max-height: 120px;
@@ -1261,6 +1332,31 @@ _FALLBACK_HTML = """\
     cursor: pointer; }
   #send:hover { opacity: 0.9; }
   #send:disabled { opacity: 0.4; cursor: default; }
+
+  /* File attachment */
+  #attach-btn { background: none; border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 12px; color: var(--text-dim); cursor: pointer; font-size: 16px;
+    display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
+  #attach-btn:hover { color: var(--text); border-color: var(--text-dim); }
+  #file-input { display: none; }
+  #file-previews { display: flex; gap: 6px; width: 100%; flex-wrap: wrap;
+    padding: 0; margin: 0; }
+  #file-previews:empty { display: none; }
+  .file-preview { display: flex; align-items: center; gap: 6px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px;
+    font-size: 12px; color: var(--text-dim); }
+  .file-preview img { width: 32px; height: 32px; object-fit: cover; border-radius: 4px; }
+  .file-preview .remove { cursor: pointer; opacity: 0.5; font-size: 14px; }
+  .file-preview .remove:hover { opacity: 1; color: var(--danger); }
+  .chat-drag-overlay { position: absolute; inset: 0; background: rgba(88,166,255,0.08);
+    border: 2px dashed var(--accent); border-radius: 12px; display: none;
+    align-items: center; justify-content: center; font-size: 16px; color: var(--accent);
+    z-index: 50; pointer-events: none; }
+  .chat-drag-overlay.active { display: flex; }
+  .msg .msg-images { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .msg .msg-images img { max-width: 200px; max-height: 150px; border-radius: 6px;
+    border: 1px solid var(--border); }
+  .msg .msg-files { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
 
   /* Settings / config pages */
   .page-content { flex: 1; overflow-y: auto; padding: 24px 32px; max-width: 700px;
@@ -1643,8 +1739,13 @@ _FALLBACK_HTML = """\
       <span class="dismiss" onclick="this.parentElement.style.display='none'">✕</span>
       <span id="context-warning-text"></span>
     </div>
-    <div id="chat-messages"></div>
+    <div id="chat-messages" style="position:relative">
+      <div class="chat-drag-overlay" id="drag-overlay">📎 Drop files here</div>
+    </div>
     <div id="input-area">
+      <div id="file-previews"></div>
+      <button id="attach-btn" onclick="document.getElementById('file-input').click()" title="Attach files">📎</button>
+      <input type="file" id="file-input" multiple accept="image/*,.pdf,.txt,.md,.csv,.json,.py,.js,.html,.css,.xml,.yaml,.yml,.toml,.log" onchange="handleFileSelect(event)">
       <textarea id="input" placeholder="What should I do?" rows="1"
         onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
       <button id="send" onclick="send()">Send</button>
@@ -3351,6 +3452,110 @@ async function saveSettings() {
   currentCfg = await cres.json();
   loadVersionInfo(currentCfg);
 }
+
+// ── File Attachment ──
+let _pendingFiles = [];  // [{name, type, data (base64), preview?}]
+
+function handleFileSelect(e) {
+  const files = Array.from(e.target.files || []);
+  files.forEach(f => readFileForAttach(f));
+  e.target.value = '';  // reset so same file can be re-selected
+}
+
+function readFileForAttach(file) {
+  if (file.size > 15 * 1024 * 1024) {
+    alert('File too large (max 15MB): ' + file.name);
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = reader.result;  // data:type;base64,...
+    _pendingFiles.push({
+      name: file.name,
+      type: file.type || 'application/octet-stream',
+      data: dataUrl,
+    });
+    renderFilePreviews();
+  };
+  reader.readAsDataURL(file);
+}
+
+function renderFilePreviews() {
+  const container = document.getElementById('file-previews');
+  container.innerHTML = _pendingFiles.map((f, i) => {
+    const isImage = f.type.startsWith('image/');
+    const thumb = isImage
+      ? '<img src="' + f.data + '">'
+      : '<span style="font-size:16px">📄</span>';
+    return '<div class="file-preview">' + thumb +
+      '<span>' + f.name + '</span>' +
+      '<span class="remove" onclick="removeFile(' + i + ')">✕</span></div>';
+  }).join('');
+}
+
+function removeFile(idx) {
+  _pendingFiles.splice(idx, 1);
+  renderFilePreviews();
+}
+
+// Drag & drop on chat area
+(function() {
+  const chatEl = document.getElementById('chat-messages');
+  const overlay = document.getElementById('drag-overlay');
+  let dragCounter = 0;
+
+  chatEl.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    dragCounter++;
+    overlay.classList.add('active');
+  });
+  chatEl.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    dragCounter--;
+    if (dragCounter <= 0) { overlay.classList.remove('active'); dragCounter = 0; }
+  });
+  chatEl.addEventListener('dragover', (e) => e.preventDefault());
+  chatEl.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dragCounter = 0;
+    overlay.classList.remove('active');
+    const files = Array.from(e.dataTransfer.files || []);
+    files.forEach(f => readFileForAttach(f));
+  });
+})();
+
+// Override send to include files
+const _origSend = send;
+send = function() {
+  const text = inputEl.value.trim();
+  if (!text && !_pendingFiles.length) return;
+  if (sendBtn.disabled) return;
+
+  // Build display message
+  let displayText = text;
+  if (_pendingFiles.length) {
+    const names = _pendingFiles.map(f => f.name).join(', ');
+    displayText = (text || '') + (text ? '\n' : '') + '📎 ' + names;
+  }
+  addMsg(displayText, 'user');
+
+  // Build WS payload
+  const payload = { type: 'chat', message: text || '' };
+  if (_pendingFiles.length) {
+    payload.files = _pendingFiles.map(f => ({
+      name: f.name,
+      type: f.type,
+      data: f.data,
+    }));
+  }
+  ws.send(JSON.stringify(payload));
+
+  _pendingFiles = [];
+  renderFilePreviews();
+  inputEl.value = '';
+  inputEl.style.height = 'auto';
+  sendBtn.disabled = true;
+};
 
 init();
 </script>

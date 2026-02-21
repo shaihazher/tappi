@@ -559,6 +559,105 @@ def tappi_launch(port: int = 0, profile: str = "default", headless: bool = False
         return _error(f"Failed to launch Chrome: {e}")
 
 
+# ── File / Image reading tools ──
+
+
+def _get_workspace() -> str:
+    """Get the workspace path, falling back to ~/tappi-workspace."""
+    try:
+        from tappi.agent.config import get_workspace
+        return str(get_workspace())
+    except Exception:
+        import os
+        return os.path.join(os.path.expanduser("~"), "tappi-workspace")
+
+
+def _safe_resolve(workspace: str, path: str) -> str:
+    """Resolve a path within the workspace. Blocks path traversal."""
+    import os
+    ws = os.path.realpath(workspace)
+    resolved = os.path.realpath(os.path.join(ws, path))
+    if not resolved.startswith(ws + os.sep) and resolved != ws:
+        raise PermissionError(f"Access denied: path escapes workspace — {path}")
+    return resolved
+
+
+@mcp.tool()
+def tappi_read_file(path: str) -> str:
+    """Read a text file's contents from the workspace directory.
+
+    Returns the file content (up to 50KB). All paths are relative to
+    the workspace and sandboxed — no access outside it.
+    """
+    try:
+        workspace = _get_workspace()
+        resolved = _safe_resolve(workspace, path)
+
+        if not os.path.isfile(resolved):
+            return _error(f"File not found: {path}")
+
+        # Check size
+        size = os.path.getsize(resolved)
+        if size > 1_000_000:  # 1MB cap for text
+            return _error(f"File too large for text reading ({size} bytes). Max 1MB.")
+
+        try:
+            with open(resolved, "r", encoding="utf-8") as f:
+                content = f.read()
+        except UnicodeDecodeError:
+            return _error(f"Binary file ({size} bytes). Use tappi_read_image for images.")
+
+        if len(content) > 50_000:
+            content = content[:50_000] + f"\n\n... (truncated, {len(content)} chars total)"
+        return content
+    except PermissionError as e:
+        return _error(str(e))
+    except Exception as e:
+        return _error(f"Error reading file: {e}")
+
+
+@mcp.tool()
+def tappi_read_image(path: str) -> str:
+    """Read an image from the workspace and return it as a base64 data URI.
+
+    Supports: PNG, JPG, JPEG, GIF, WEBP, BMP.
+    Returns a data URI string suitable for vision/image analysis.
+    Max file size: 10MB. All paths are relative to the workspace.
+    """
+    import base64 as _b64
+
+    try:
+        workspace = _get_workspace()
+        resolved = _safe_resolve(workspace, path)
+
+        if not os.path.isfile(resolved):
+            return _error(f"File not found: {path}")
+
+        # Validate extension
+        ext = os.path.splitext(resolved)[1].lower().lstrip(".")
+        mime_map = {
+            "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+            "gif": "image/gif", "webp": "image/webp", "bmp": "image/bmp",
+        }
+        if ext not in mime_map:
+            return _error(f"Unsupported image format: .{ext}. Supported: {', '.join(mime_map.keys())}")
+
+        size = os.path.getsize(resolved)
+        if size > 10 * 1024 * 1024:
+            return _error(f"Image too large ({size // (1024*1024)}MB). Max 10MB.")
+
+        with open(resolved, "rb") as f:
+            data = f.read()
+
+        b64 = _b64.b64encode(data).decode("ascii")
+        mime = mime_map[ext]
+        return f"data:{mime};base64,{b64}"
+    except PermissionError as e:
+        return _error(str(e))
+    except Exception as e:
+        return _error(f"Error reading image: {e}")
+
+
 # ── Entry point ──
 
 
