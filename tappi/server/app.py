@@ -50,6 +50,11 @@ def _get_agent() -> Agent:
         if not is_configured():
             raise RuntimeError("Agent not configured. Complete setup first.")
         cfg = get_agent_config()
+        # Set CDP_URL if configured (connects to external browser like OpenClaw)
+        cdp_url = cfg.get("cdp_url")
+        if cdp_url:
+            import os
+            os.environ["CDP_URL"] = cdp_url
         _agent = Agent(
             browser_profile=cfg.get("browser_profile"),
             on_tool_call=_on_tool_call,
@@ -161,6 +166,7 @@ async def config() -> JSONResponse:
         "model": cfg.get("model"),
         "workspace": cfg.get("workspace"),
         "browser_profile": cfg.get("browser_profile"),
+        "cdp_url": cfg.get("cdp_url", ""),
         "shell_enabled": cfg.get("shell_enabled", True),
         "decompose_enabled": cfg.get("decompose_enabled", True),
         "timeout": cfg.get("timeout", 300),
@@ -618,7 +624,7 @@ async def update_config(body: dict) -> JSONResponse:
     config = load_config()
     agent_cfg = config.get("agent", {})
 
-    allowed = {"model", "shell_enabled", "browser_profile", "decompose_enabled",
+    allowed = {"model", "shell_enabled", "browser_profile", "cdp_url", "decompose_enabled",
                "timeout", "main_max_tokens", "subagent_max_tokens"}
     for key in allowed:
         if key in body:
@@ -631,6 +637,16 @@ async def update_config(body: dict) -> JSONResponse:
     if _agent:
         if "browser_profile" in body:
             _agent._browser._default_profile = body["browser_profile"]
+        if "cdp_url" in body:
+            cdp_url = body["cdp_url"]
+            if cdp_url:
+                import os
+                os.environ["CDP_URL"] = cdp_url
+            else:
+                import os
+                os.environ.pop("CDP_URL", None)
+            # Force reconnection on next tool call
+            _agent._browser._browser = None
         if "decompose_enabled" in body:
             _agent._decompose_enabled = body["decompose_enabled"]
 
@@ -785,6 +801,10 @@ async def run_setup(body: dict) -> JSONResponse:
         except ValueError:
             create_profile(browser_profile)
         agent_cfg["browser_profile"] = browser_profile
+
+    # CDP URL override (connect to external browser)
+    if "cdp_url" in body:
+        agent_cfg["cdp_url"] = body["cdp_url"]
 
     config["agent"] = agent_cfg
     save_config(config)
@@ -1724,6 +1744,11 @@ _FALLBACK_HTML = """\
         <div class="field">
           <label>Browser Profile</label>
           <select id="cfg-profile"></select>
+        </div>
+        <div class="field">
+          <label>CDP URL <span style="font-size:11px;color:var(--text-dim)">(override — connect to an external browser)</span></label>
+          <input type="text" id="cfg-cdp-url" placeholder="e.g. http://127.0.0.1:18800 (leave empty to use profile port)">
+          <p style="font-size:11px;color:var(--text-dim);margin-top:4px">Set this to connect to a browser already running on a specific port (e.g. OpenClaw browser). Overrides the profile's default port.</p>
         </div>
         <div class="field">
           <label>Subagent Timeout (seconds)</label>
@@ -3195,6 +3220,7 @@ async function loadSettingsPage() {
   // Shell
   document.getElementById('cfg-shell').checked = cfg.shell_enabled !== false;
   document.getElementById('cfg-decompose').checked = cfg.decompose_enabled !== false;
+  document.getElementById('cfg-cdp-url').value = cfg.cdp_url || '';
   document.getElementById('cfg-timeout').value = cfg.timeout || 300;
   document.getElementById('cfg-main-max-tokens').value = cfg.main_max_tokens || 8192;
   document.getElementById('cfg-subagent-max-tokens').value = cfg.subagent_max_tokens || 4096;
@@ -3252,11 +3278,12 @@ async function saveSettings() {
   const shell_enabled = document.getElementById('cfg-shell').checked;
   const decompose_enabled = document.getElementById('cfg-decompose').checked;
   const browser_profile = document.getElementById('cfg-profile').value;
+  const cdp_url = document.getElementById('cfg-cdp-url').value.trim();
   const timeout = parseInt(document.getElementById('cfg-timeout').value) || 300;
   const main_max_tokens = parseInt(document.getElementById('cfg-main-max-tokens').value) || 8192;
   const subagent_max_tokens = parseInt(document.getElementById('cfg-subagent-max-tokens').value) || 4096;
 
-  const body = { provider, model, workspace, browser_profile, shell_enabled, decompose_enabled, timeout, main_max_tokens, subagent_max_tokens };
+  const body = { provider, model, workspace, browser_profile, cdp_url, shell_enabled, decompose_enabled, timeout, main_max_tokens, subagent_max_tokens };
 
   // Collect credentials
   if (info.fields) {
