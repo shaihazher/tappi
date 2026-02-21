@@ -45,17 +45,31 @@ For complex tasks, return a JSON array of subtask objects. Each subtask has:
 
 Rules:
 - Each subtask should be independently executable with a clear output.
-- The LAST subtask is ALWAYS a compilation step with tool "compile".
-- Compilation takes all prior outputs and produces the final answer.
 - Keep the list short — 3-7 subtasks is ideal, max 10.
 - Each subtask's "task" should include enough context to execute without seeing the original query.
+- For **research/report tasks** (gathering info, comparing options, writing reports): \
+end with a "compile" step that synthesizes all findings.
+- For **action tasks** (sending emails, filling forms, posting content, making purchases): \
+do NOT add a compile step. The last subtask should be the final action itself. \
+The user wants the action done, not a report about it.
+- If the task mixes research + action (e.g. "find plumbers and email the list"), \
+the final step should be the ACTION (sending the email), not a compilation.
 
-Example response for a complex task:
+Example — research task:
 ```json
 [
   {{"task": "Search Google for 'best Python web frameworks 2025' and extract the top 5 results with descriptions", "tool": "browser", "output": "step_1_search.md"}},
   {{"task": "Visit each framework's official site and note key features, performance claims, and community size", "tool": "browser", "output": "step_2_details.md"}},
   {{"task": "Compile all findings into a comprehensive comparison report with recommendations", "tool": "compile", "output": "final_report.md"}}
+]
+```
+
+Example — action task (no compile step):
+```json
+[
+  {{"task": "Search Google Maps for plumbers in Houston TX and extract business details", "tool": "browser", "output": "step_1_plumbers.md"}},
+  {{"task": "Format the plumber details into a clean email body", "tool": "files", "output": "step_2_email_body.md"}},
+  {{"task": "Open Gmail, compose a new email to info@example.com with subject 'Plumber List' and paste the formatted content from step_2_email_body.md, then send it", "tool": "browser", "output": "step_3_sent.md"}}
 ]
 ```
 
@@ -68,21 +82,24 @@ User task: {task}
 """
 
 SUBTASK_SYSTEM_PROMPT = """\
-You are a focused research agent. Today is {today}.
+You are a focused agent. Today is {today}.
 
-You have ONE job: complete the task below using the {tool} tool, then \
-write your findings as your final response.
+You have ONE job: complete the task below using the {tool} tool.
 
 Your workspace is: {workspace}
 
 ## Rules
 - Stay focused — do NOT go on tangents.
 - Be EFFICIENT. Aim for under 10 tool calls total.
-- When you have enough information, STOP browsing and write your report.
+- If the task is **research/gathering**: collect info, then write your findings \
+as your final text response. Include source URLs. Write a thorough report.
+- If the task is an **action** (send email, fill form, click button, post content): \
+COMPLETE THE ACTION in the browser. Verify it succeeded (use 'check' after typing, \
+confirm the send/submit went through). Your final text response should confirm \
+what you did and the outcome.
 - Your final text response IS your output — do NOT call any file write tool.
-- Include source URLs as citations in your report.
-- Write a thorough report with key facts, data points, and citations. \
-Not a summary — a proper report.
+- If prior subtask outputs exist as files in your workspace, read them when your \
+task references prior steps.
 """
 
 COMPILE_SYSTEM_PROMPT = """\
