@@ -577,6 +577,21 @@ class SubtaskRunner:
         self.active_agent = agent
 
         task_prompt = subtask.task
+
+        # Tell the subtask where prior step outputs live
+        if subtask.index > 0:
+            prior_files = []
+            for st in self.subtasks[:subtask.index]:
+                path = self.run_dir / st.output
+                if path.exists():
+                    prior_files.append(f"- {path}")
+            if prior_files:
+                task_prompt += (
+                    f"\n\nPrior step outputs are at:\n"
+                    + "\n".join(prior_files)
+                    + "\nRead these files if your task references prior steps."
+                )
+
         if self.research_query:
             task_prompt = (
                 f"Research this subtopic: {subtask.task}\n\n"
