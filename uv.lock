@@ -2431,7 +2431,7 @@ wheels = [
 
 [[package]]
 name = "tappi"
-version = "0.5.5"
+version = "0.8.2"
 source = { editable = "." }
 dependencies = [
     { name = "apscheduler" },

@@ -2326,6 +2326,7 @@ async function init() {
     loadVersionInfo(currentCfg);
     loadSessions();
     loadProfileSwitcher();
+    showPage('chat');
     // Sync decompose toggle with config
     const dt = document.getElementById('decompose-toggle');
     if (dt) dt.checked = currentCfg.decompose_enabled !== false;
@@ -3537,7 +3538,7 @@ send = function() {
   let displayText = text;
   if (_pendingFiles.length) {
     const names = _pendingFiles.map(f => f.name).join(', ');
-    displayText = (text || '') + (text ? '\n' : '') + '📎 ' + names;
+    displayText = (text || '') + (text ? '\\n' : '') + '📎 ' + names;
   }
   addMsg(displayText, 'user');
 
