@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tappi</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="sidebar">
+  <div class="logo">🌐 tappi</div>
+  <nav>
+    <a class="active" data-page="chat" onclick="showPage('chat')">💬 Chat</a>
+    <a data-page="profiles" onclick="showPage('profiles')">🌍 Browser Profiles</a>
+    <a data-page="jobs" onclick="showPage('jobs')">⏰ Scheduled Jobs</a>
+    <a data-page="settings" onclick="showPage('settings')">⚙️ Settings</a>
+    <div class="sessions-section" id="sessions-section">
+      <div class="section-title">Recent Chats</div>
+      <div id="sessions-list"></div>
+    </div>
+  </nav>
+  <button class="btn" onclick="launchActiveBrowser()" id="launch-browser-btn" style="margin:8px 12px;width:calc(100% - 24px);font-size:12px;padding:8px">🌍 Open Browser</button>
+  <div class="token-bar-wrap" id="token-bar-wrap" style="display:none">
+    <div class="token-bar"><div class="fill ok" id="token-fill" style="width:0%"></div></div>
+    <div class="token-bar-label">
+      <span id="token-label">0 tokens</span>
+      <span id="token-pct">0%</span>
+    </div>
+  </div>
+  <div class="version" id="version-info">tappi</div>
+</div>
+
+<div id="main">
+  <!-- Setup Page (shown when not configured) -->
+  <div class="page" id="page-setup">
+    <header><h2>🔧 Setup</h2></header>
+    <div class="page-content">
+      <div class="card">
+        <h3>Welcome to tappi</h3>
+        <p>Let's configure your AI agent step by step.</p>
+      </div>
+
+      <div class="wizard-steps" id="wizard-steps">
+        <div class="wizard-step current" data-step="1"></div>
+        <div class="wizard-step" data-step="2"></div>
+        <div class="wizard-step" data-step="3"></div>
+        <div class="wizard-step" data-step="4"></div>
+        <div class="wizard-step" data-step="5"></div>
+        <div class="wizard-step" data-step="6"></div>
+      </div>
+
+      <!-- Step 1: Provider + Key -->
+      <div class="wizard-section active" id="wizard-1">
+        <div class="card">
+          <h3>Step 1: LLM Provider &amp; API Key</h3>
+          <div class="field">
+            <label>Provider</label>
+            <select id="setup-provider" onchange="onSetupProviderChange()">
+              <option value="">— Select —</option>
+            </select>
+          </div>
+          <div id="setup-provider-note" style="font-size:12px;color:var(--text-dim);margin-bottom:12px;display:none"></div>
+          <div id="setup-key-section"></div>
+          <div id="setup-provider-fields"></div>
+          <div class="validation-status" id="key-validation"></div>
+        </div>
+        <div class="wizard-nav">
+          <button class="btn" onclick="wizardNext(1)" id="wizard-next-1">Next →</button>
+        </div>
+      </div>
+
+      <!-- Step 2: Model -->
+      <div class="wizard-section" id="wizard-2">
+        <div class="card">
+          <h3>Step 2: Choose a Model</h3>
+          <div class="filter-toggle">
+            <input type="checkbox" id="setup-tool-filter" checked onchange="onSetupToolFilterChange()">
+            <label for="setup-tool-filter" style="margin:0;text-transform:none">Only show models with tool-use support</label>
+          </div>
+          <div id="setup-model-picker"></div>
+          <div class="field" style="margin-top:8px">
+            <label>Or type a custom model name</label>
+            <input type="text" id="setup-model-custom" placeholder="Leave empty to use selection above">
+          </div>
+        </div>
+        <div class="wizard-nav">
+          <button class="btn secondary" onclick="wizardBack(2)">← Back</button>
+          <button class="btn" onclick="wizardNext(2)">Next →</button>
+        </div>
+      </div>
+
+      <!-- Step 3: Workspace -->
+      <div class="wizard-section" id="wizard-3">
+        <div class="card">
+          <h3>Step 3: Workspace Directory</h3>
+          <p>All file operations are sandboxed to this directory.</p>
+          <div class="field">
+            <label>Path</label>
+            <div class="folder-input-wrap">
+              <input type="text" id="setup-workspace" placeholder="~/tappi-workspace">
+              <button class="btn" onclick="openFolderPicker('setup-workspace')">Browse</button>
+            </div>
+          </div>
+        </div>
+        <div class="wizard-nav">
+          <button class="btn secondary" onclick="wizardBack(3)">← Back</button>
+          <button class="btn" onclick="wizardNext(3)">Next →</button>
+        </div>
+      </div>
+
+      <!-- Step 4: Browser Profile -->
+      <div class="wizard-section" id="wizard-4">
+        <div class="card">
+          <h3>Step 4: Browser Profile</h3>
+          <p>Each profile keeps its own logins and cookies. The agent uses this browser to browse the web, fill forms, and interact with sites on your behalf.</p>
+          <div class="field">
+            <label>Profile</label>
+            <select id="setup-browser-profile"></select>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+            <input type="text" id="setup-new-profile" placeholder="New profile name" style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:var(--text);font-size:13px;flex:1">
+            <button class="btn secondary" onclick="setupCreateProfile()" style="white-space:nowrap">Create</button>
+          </div>
+        </div>
+        <div class="wizard-nav">
+          <button class="btn secondary" onclick="wizardBack(4)">← Back</button>
+          <button class="btn" onclick="wizardNext(4)">Next →</button>
+        </div>
+      </div>
+
+      <!-- Step 5: Launch Browser + Login (optional) -->
+      <div class="wizard-section" id="wizard-5">
+        <div class="card" style="background:rgba(88,166,255,0.06);border-color:rgba(88,166,255,0.2)">
+          <h3>🌍 Log in to your accounts</h3>
+          <p>Click the button below to open the browser. Log in to any sites you want the agent to access — Gmail, GitHub, social media, etc. Your sessions will be saved to the profile you just selected.</p>
+          <p style="color:var(--text-dim);font-size:12px;margin-top:8px">This is optional — you can always do it later from the sidebar.</p>
+          <button class="btn" onclick="setupLaunchBrowser()" id="setup-launch-browser" style="margin-top:12px">🌍 Open Browser</button>
+          <span id="setup-browser-status" style="font-size:12px;color:var(--text-dim);margin-left:8px"></span>
+        </div>
+        <div class="wizard-nav">
+          <button class="btn secondary" onclick="wizardBack(5)">← Back</button>
+          <button class="btn" onclick="wizardNext(5)">Next →</button>
+        </div>
+      </div>
+
+      <!-- Step 6: Permissions + Finish -->
+      <div class="wizard-section" id="wizard-6">
+        <div class="card">
+          <h3>Step 6: Permissions</h3>
+          <div class="field" style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" id="setup-shell" style="width:auto" checked>
+            <label for="setup-shell" style="margin:0;text-transform:none">Allow shell commands</label>
+          </div>
+        </div>
+        <div class="wizard-nav">
+          <button class="btn secondary" onclick="wizardBack(6)">← Back</button>
+          <button class="btn" onclick="submitSetup()" id="setup-submit" style="flex:2">Save &amp; Start</button>
+        </div>
+      </div>
+
+      <div id="setup-error" style="color:var(--danger);font-size:13px;margin-top:8px;display:none"></div>
+    </div>
+  </div>
+
+  <!-- Chat Page -->
+  <div class="page" id="page-chat">
+    <header>
+      <h2>Chat</h2>
+      <select id="profile-switcher" onchange="switchProfile()" title="Active browser profile" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:4px 8px;color:var(--text);font-size:12px;margin-left:auto;cursor:pointer"></select>
+      <label class="toggle-switch" title="Deep Mode: breaks complex tasks into focused subtasks for thorough results">
+        <input type="checkbox" id="decompose-toggle" checked onchange="toggleDecompose()">
+        <span class="toggle-slider"></span>
+        <span class="toggle-label">Deep</span>
+      </label>
+      <button class="btn secondary" onclick="probeAgent()" id="probe-btn" style="font-size:12px;padding:6px 10px" title="Check what the agent is doing right now">🔍 Probe</button>
+      <button class="btn danger" onclick="flushAgent()" id="flush-btn" style="font-size:12px;padding:6px 10px" title="Stop the agent and dump context">⏹ Flush</button>
+      <button class="btn secondary" onclick="resetChat()" style="font-size:12px;padding:6px 10px">New Chat</button>
+      <div class="status" id="status">Connecting...</div>
+    </header>
+    <div class="context-warning" id="context-warning">
+      <span class="dismiss" onclick="this.parentElement.style.display='none'">✕</span>
+      <span id="context-warning-text"></span>
+    </div>
+    <div id="chat-messages" style="position:relative">
+      <div class="chat-drag-overlay" id="drag-overlay">📎 Drop files here</div>
+    </div>
+    <div id="input-area">
+      <div id="file-previews"></div>
+      <div style="display:flex;gap:8px;align-items:flex-end">
+        <button id="attach-btn" onclick="document.getElementById('file-input').click()" title="Attach files">📎</button>
+        <input type="file" id="file-input" multiple accept="image/*,.pdf,.txt,.md,.csv,.json,.py,.js,.html,.css,.xml,.yaml,.yml,.toml,.log" onchange="handleFileSelect(event)">
+        <textarea id="input" placeholder="What should I do?" rows="1"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
+        <button id="send" onclick="send()">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Profiles Page -->
+  <div class="page" id="page-profiles">
+    <header><h2>Browser Profiles</h2></header>
+    <div class="page-content">
+      <div class="card">
+        <h3>Your Profiles</h3>
+        <p>Each profile has its own browser sessions (cookies, logins) and CDP port.</p>
+        <div id="profiles-list"><div class="empty">Loading...</div></div>
+      </div>
+      <div class="card">
+        <h3>New Profile</h3>
+        <div class="field">
+          <label>Profile Name</label>
+          <input type="text" id="new-profile-name" placeholder="e.g. work, personal, social">
+        </div>
+        <button class="btn" onclick="createProfile()">Create Profile</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Jobs Page -->
+  <div class="page" id="page-jobs">
+    <header>
+      <h2>Scheduled Jobs</h2>
+      <div class="status" id="jobs-status"></div>
+    </header>
+    <div class="page-content">
+      <!-- Active Runs -->
+      <div class="card" id="active-runs-card" style="display:none">
+        <h3>🔴 Running Now</h3>
+        <div id="active-runs-list"></div>
+      </div>
+
+      <!-- Job Definitions -->
+      <div class="card">
+        <h3>Cron Jobs</h3>
+        <p>Recurring tasks the agent runs automatically.</p>
+        <div id="jobs-list"><div class="empty">Loading...</div></div>
+      </div>
+
+      <!-- Recent Runs -->
+      <div class="card">
+        <h3>Recent Runs</h3>
+        <div id="runs-list"><div class="empty">Loading...</div></div>
+      </div>
+
+      <p style="font-size:12px;color:var(--text-dim)">
+        💡 Create jobs via chat: "Schedule a task to check my email every morning at 9 AM"
+      </p>
+    </div>
+  </div>
+
+  <!-- Cron Run Viewer (overlay page) -->
+  <div class="page" id="page-cron-run">
+    <header>
+      <h2 id="cron-run-title">Job Run</h2>
+      <button class="btn secondary" onclick="probeCronRun()" style="margin-left:auto;font-size:12px;padding:6px 10px">🔍 Probe</button>
+      <button class="btn secondary" onclick="showPage('jobs')" style="font-size:12px;padding:6px 10px">← Back</button>
+      <div class="status" id="cron-run-status"></div>
+    </header>
+    <div id="cron-run-messages" style="flex:1;overflow-y:auto;padding:16px 20px;display:flex;flex-direction:column;gap:12px"></div>
+  </div>
+
+  <!-- Settings Page -->
+  <div class="page" id="page-settings">
+    <header><h2>Settings</h2></header>
+    <div class="page-content">
+      <div class="card">
+        <h3>LLM Provider &amp; Credentials</h3>
+        <div class="field">
+          <label>Provider</label>
+          <select id="cfg-provider" onchange="onCfgProviderChange()"></select>
+        </div>
+        <div id="cfg-credentials-status"></div>
+        <!-- Dynamic credential fields rendered here -->
+        <div id="cfg-key-section"></div>
+        <div id="cfg-provider-fields"></div>
+      </div>
+      <div class="card">
+        <h3>Model</h3>
+        <div id="cfg-model-picker"></div>
+        <div class="field" style="margin-top:8px">
+          <label>Custom model (overrides search above)</label>
+          <input type="text" id="cfg-model" placeholder="Leave empty to use selection above">
+        </div>
+      </div>
+      <div class="card">
+        <h3>Workspace</h3>
+        <div class="field">
+          <label>Directory</label>
+          <div class="folder-input-wrap">
+            <input type="text" id="cfg-workspace">
+            <button class="btn" onclick="openFolderPicker('cfg-workspace')">Browse</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Permissions</h3>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="cfg-shell" style="width:auto">
+          <label for="cfg-shell" style="margin:0;text-transform:none">Allow shell commands</label>
+        </div>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="cfg-decompose" style="width:auto" checked>
+          <label for="cfg-decompose" style="margin:0;text-transform:none">Deep Mode</label>
+          <span style="font-size:11px;color:var(--text-dim)">(breaks complex tasks into focused subtasks)</span>
+        </div>
+        <div class="field">
+          <label>Browser Profile</label>
+          <select id="cfg-profile"></select>
+        </div>
+        <div class="field">
+          <label>CDP URL <span style="font-size:11px;color:var(--text-dim)">(override — connect to an external browser)</span></label>
+          <input type="text" id="cfg-cdp-url" placeholder="e.g. http://127.0.0.1:18800 (leave empty to use profile port)">
+          <p style="font-size:11px;color:var(--text-dim);margin-top:4px">Set this to connect to a browser already running on a specific port (e.g. OpenClaw browser). Overrides the profile's default port.</p>
+        </div>
+        <div class="field">
+          <label>Subagent Timeout (seconds)</label>
+          <input type="number" id="cfg-timeout" min="30" max="3600" value="300">
+          <p style="font-size:11px;color:var(--text-dim);margin-top:4px">Max time per LLM call. Orphaned threads are killed after this.</p>
+        </div>
+        <div class="field">
+          <label>Main Agent Max Tokens</label>
+          <input type="number" id="cfg-main-max-tokens" min="1024" max="64000" value="8192">
+          <p style="font-size:11px;color:var(--text-dim);margin-top:4px">Chat responses + compiler/orchestrator in deep research.</p>
+        </div>
+        <div class="field">
+          <label>Subagent Max Tokens</label>
+          <input type="number" id="cfg-subagent-max-tokens" min="1024" max="64000" value="4096">
+          <p style="font-size:11px;color:var(--text-dim);margin-top:4px">Research sub-agents. Lower = faster, more focused.</p>
+        </div>
+      </div>
+      <button class="btn" onclick="saveSettings()" style="width:100%;padding:10px">Save Settings</button>
+      <div id="cfg-saved" style="color:var(--success);font-size:13px;margin-top:8px;display:none">✓ Saved</div>
+    </div>
+  </div>
+</div>
+
+<!-- Folder picker modal -->
+<div class="folder-modal-overlay" id="folder-modal">
+  <div class="folder-modal">
+    <div class="folder-modal-header">
+      <h3>📁 Choose Workspace Directory</h3>
+      <span style="cursor:pointer;opacity:0.6" onclick="closeFolderPicker()">✕</span>
+    </div>
+    <div class="folder-modal-path">
+      <span class="icon" style="cursor:pointer" id="folder-up" onclick="folderUp()">⬆</span>
+      <span class="path-text" id="folder-current-path">/</span>
+    </div>
+    <div class="folder-modal-list" id="folder-list"></div>
+    <div class="folder-modal-footer">
+      <button class="btn" style="background:var(--border);color:var(--text)" onclick="closeFolderPicker()">Cancel</button>
+      <button class="btn" onclick="selectFolder()">Select This Folder</button>
+    </div>
+  </div>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
