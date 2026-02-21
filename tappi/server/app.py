@@ -1320,7 +1320,7 @@ _FALLBACK_HTML = """\
   .msg.tool .tool-name { color: var(--accent); font-weight: 600; }
   .msg.thinking { color: var(--text-dim); font-style: italic; }
   #input-area { padding: 12px 20px; border-top: 1px solid var(--border);
-    display: flex; gap: 8px; flex-wrap: wrap; }
+    display: flex; flex-direction: column; gap: 8px; }
   #input { flex: 1; background: var(--surface); border: 1px solid var(--border);
     border-radius: 8px; padding: 10px 14px; color: var(--text); font-size: 14px;
     outline: none; resize: none; min-height: 44px; max-height: 120px;
@@ -1339,7 +1339,7 @@ _FALLBACK_HTML = """\
     display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
   #attach-btn:hover { color: var(--text); border-color: var(--text-dim); }
   #file-input { display: none; }
-  #file-previews { display: flex; gap: 6px; width: 100%; flex-wrap: wrap;
+  #file-previews { display: flex; gap: 6px; flex-wrap: wrap;
     padding: 0; margin: 0; }
   #file-previews:empty { display: none; }
   .file-preview { display: flex; align-items: center; gap: 6px; background: var(--surface);
@@ -1744,11 +1744,13 @@ _FALLBACK_HTML = """\
     </div>
     <div id="input-area">
       <div id="file-previews"></div>
-      <button id="attach-btn" onclick="document.getElementById('file-input').click()" title="Attach files">📎</button>
-      <input type="file" id="file-input" multiple accept="image/*,.pdf,.txt,.md,.csv,.json,.py,.js,.html,.css,.xml,.yaml,.yml,.toml,.log" onchange="handleFileSelect(event)">
-      <textarea id="input" placeholder="What should I do?" rows="1"
-        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
-      <button id="send" onclick="send()">Send</button>
+      <div style="display:flex;gap:8px;align-items:flex-end">
+        <button id="attach-btn" onclick="document.getElementById('file-input').click()" title="Attach files">📎</button>
+        <input type="file" id="file-input" multiple accept="image/*,.pdf,.txt,.md,.csv,.json,.py,.js,.html,.css,.xml,.yaml,.yml,.toml,.log" onchange="handleFileSelect(event)">
+        <textarea id="input" placeholder="What should I do?" rows="1"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();send()}"></textarea>
+        <button id="send" onclick="send()">Send</button>
+      </div>
     </div>
   </div>
 
