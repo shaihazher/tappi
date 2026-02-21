@@ -42,7 +42,10 @@ mcp = FastMCP(
         "- tappi_check: Read element value/state without modifying it.\n"
         "- tappi_eval: Custom JS — last resort.\n"
         "- tappi_keys: Raw keyboard for canvas apps (Sheets, Docs, Figma).\n\n"
-        "Recovery: if a smart action reports ⚠, use tappi_focus → retry → tappi_keys --escape → retry → tappi_eval."
+        "Recovery: if a smart action reports ⚠, use tappi_focus → retry → tappi_keys --escape → retry → tappi_eval.\n\n"
+        "File tools (workspace-sandboxed):\n"
+        "- tappi_read_file: Read text files from the workspace.\n"
+        "- tappi_read_image: Read an image and get a data URI for vision."
     ),
 )
 

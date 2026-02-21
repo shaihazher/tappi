@@ -19,7 +19,8 @@ TOOL_SCHEMA = {
         "name": "files",
         "description": (
             "Manage files in the workspace directory. Read, write, list, move, "
-            "copy, and delete files. All paths are relative to the workspace — "
+            "copy, and delete files. Can read images (png, jpg, gif, webp, bmp) — "
+            "you'll see the image via vision. All paths are relative to the workspace — "
             "you cannot access files outside it."
         ),
         "parameters": {
@@ -30,7 +31,7 @@ TOOL_SCHEMA = {
                     "enum": ["read", "write", "list", "move", "copy", "delete", "mkdir", "info", "grep"],
                     "description": (
                         "File action:\n"
-                        "- read: Read file contents (requires 'path')\n"
+                        "- read: Read file contents or view images (requires 'path')\n"
                         "- write: Write/create file (requires 'path' and 'content')\n"
                         "- list: List directory contents (optional 'path', default root)\n"
                         "- move: Move/rename file (requires 'path' and 'destination')\n"

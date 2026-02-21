@@ -90,7 +90,7 @@ TOOL_SCHEMA = {
                         "Use grep to verify specific content without reading the full page — e.g. grep='Message sent'\n"
                         "- html: Get element HTML (requires 'selector')\n"
                         "- eval: Run JavaScript (requires 'expression')\n"
-                        "- screenshot: Save screenshot (optional: 'path')\n"
+                        "- screenshot: Take screenshot and return the image (you'll see it via vision). Optional: 'path'\n"
                         "- scroll: Scroll page (requires 'direction': up/down/top/bottom, optional 'amount')\n"
                         "- url: Get current URL\n"
                         "- back/forward/refresh: Navigate history\n"

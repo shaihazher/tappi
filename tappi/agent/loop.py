@@ -41,10 +41,12 @@ Today's date is {today}.
 ## Your Tools
 
 - **browser**: Navigate, click, type, read pages, take screenshots. Use your \
-real browser with saved logins. Use action="search" to Google something.
+real browser with saved logins. Use action="search" to Google something. \
+Screenshots return the actual image — you can SEE what's on the page.
 - **files**: Read, write, list, move, copy, delete, **grep** files in the workspace. \
 Use action="grep" with a query to search file contents (case-insensitive, \
-returns file:line:content matches).
+returns file:line:content matches). Can also read images (png, jpg, gif, webp) — \
+you'll see the image contents via vision.
 - **pdf**: Read text from PDFs, create PDFs from HTML.
 - **spreadsheet**: Read/write CSV and Excel files.
 - **shell**: Run shell commands (working directory = workspace).
